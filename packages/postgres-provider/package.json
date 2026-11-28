@@ -15,6 +15,7 @@
     "./fulfillment-capability-executor": "./src/fulfillment-capability-executor.ts",
     "./fulfillment-projections": "./src/fulfillment-projections.ts",
     "./ledger-capability-executor": "./src/ledger-capability-executor.ts",
+    "./open-item-capability-executor": "./src/open-item-capability-executor.ts",
     "./receiving-capability-executor": "./src/receiving-capability-executor.ts",
     "./receivables-capability-executor": "./src/receivables-capability-executor.ts",
     "./payables-capability-executor": "./src/payables-capability-executor.ts",

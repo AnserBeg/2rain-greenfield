@@ -37,6 +37,7 @@ import {
 import { calculatedDisplayFieldSchema } from './calculated-display-schema.js';
 import { formulaValidationRuleSchema } from './formula-validation-schema.js';
 import { lineTotalsSchemas } from './line-totals-schema.js';
+import { openItemSchemas } from './open-item-schema.js';
 import { LEGAL_ENTITY_SCOPE_CONTRACT_V1 } from './legal-entity-scope-kernel.js';
 
 const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
@@ -2997,6 +2998,19 @@ export const FieldNumberingSchema = z.strictObject({
   prefix: z.string().regex(/^[A-Z][A-Z0-9]{0,7}$/u),
   minimumDigits: z.int().min(1).max(12),
   start: z.int().min(1).max(1_000_000_000),
+  /**
+   * OPEN-ITEM-1: assign the number when a declared open-item issue moves the
+   * record across this transition, not on create. Absent, a create assigns it
+   * as before. The field is then optional, carries no business key, and
+   * leaves every input.
+   */
+  assignOn: z.strictObject({ transitionId: CanonicalIdSchema }).optional(),
+  /**
+   * The series one number counts in: every record of the tenant (absent, the
+   * create-time sequence), or each company apart. Only an issue-assigned
+   * number is counted per company.
+   */
+  scope: z.enum(['tenant', 'legalEntity']).optional(),
 });
 export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
 /**
@@ -3161,6 +3175,9 @@ const lineTotals = lineTotalsSchemas(
   LabelSchema,
   CanonicalSignedDecimalStringSchema,
 );
+
+// OPEN-ITEM-1: the open-item role and its application type.
+const openItems = openItemSchemas(CanonicalIdSchema);
 
 const formulaRules = z
   .array(FormulaValidationRuleDefinitionSchema)
@@ -3366,6 +3383,7 @@ const v6NormalizedShape = {
   formulaRules,
   calculatedDisplayFields,
   ...lineTotals,
+  ...openItems,
   operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
@@ -3516,6 +3534,7 @@ const v6AuthoredShape = {
   formulaRules,
   calculatedDisplayFields,
   ...lineTotals,
+  ...openItems,
   operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,

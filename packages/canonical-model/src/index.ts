@@ -236,3 +236,4 @@ export type {
   ValidationScalar,
 } from './formula-validation.js';
 export * from './line-totals.js';
+export * from './open-item.js';

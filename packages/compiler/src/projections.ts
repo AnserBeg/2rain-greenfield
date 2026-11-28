@@ -8,6 +8,12 @@ import {
   type CompiledTotalledRelation,
 } from '../../canonical-model/src/line-totals.js';
 import { zeroComparesStoredMoney } from '../../canonical-model/src/formula-validation-bindings.js';
+import {
+  bindOpenItems,
+  declaresOpenItems,
+  OPEN_ITEM_OPERATION_READER,
+  type BoundOpenItems,
+} from '../../canonical-model/src/open-item.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   REPORT_ANALYSIS_READER,
@@ -311,6 +317,7 @@ export function lowerBaseProjectionPayloads(
     compilerSemanticProfileVersion,
     verificationPackageRevision,
     lineTotalsOf(verificationPackageRevision),
+    openItemsOf(verificationPackageRevision),
   );
   // The reversibility declaration (AI-UNDO-1) needs the compiled input
   // contracts, which only current-language releases carry. The dispatch
@@ -357,11 +364,12 @@ export function lowerBaseProjectionPayloads(
   // ADR-0094: the line-totals reader is the highest operation floor; it
   // claims every reader below it.
   const lineTotals = lineTotalsOf(verificationPackageRevision);
-  const operationFloor =
-    lineTotals.derived.size ||
-    lineTotals.createOnly.size ||
-    lineTotals.totalled.size ||
-    zeroComparesStoredMoney(verificationPackageRevision)
+  const operationFloor = declaresOpenItems(verificationPackageRevision)
+    ? OPEN_ITEM_OPERATION_READER
+    : lineTotals.derived.size ||
+        lineTotals.createOnly.size ||
+        lineTotals.totalled.size ||
+        zeroComparesStoredMoney(verificationPackageRevision)
       ? LINE_TOTALS_OPERATION_READER
       : hasRecordTemplateBinding(verificationPackageRevision)
         ? RECORD_TEMPLATE_OPERATION_READER
@@ -1058,12 +1066,26 @@ export function lineTotalsOf(
       };
 }
 
+/**
+ * The bound open-item declarations (OPEN-ITEM-1). The compiler refuses a
+ * revision whose declarations do not bind before any projection is lowered.
+ */
+export function openItemsOf(
+  revision: VersionedNormalizedApplicationPackage,
+): BoundOpenItems {
+  const bound = bindOpenItems(revision);
+  return bound.status === 'bound'
+    ? bound.binding
+    : { declared: false, operations: new Map(), protectedFields: new Map() };
+}
+
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   original: VersionedNormalizedApplicationPackage,
   lineTotals: BoundLineTotals,
+  openItems: BoundOpenItems,
 ): unknown {
   // Only authored capability Task bindings introduce this envelope. Existing
   // record/revision-only commands retain their exact closed contracts and bytes.
@@ -1125,6 +1147,10 @@ function operationCatalogPayload(
         ? { booking: operation.booking }
         : {}),
       effect: resolvedEffect(operation.effect, packageRevision),
+      // OPEN-ITEM-1: the compiled binding an issue or apply executes by.
+      ...(openItems.operations.has(operation.operationId)
+        ? { openItem: openItems.operations.get(operation.operationId) }
+        : {}),
       // Declared command words (presentation only); absent, the reader derives
       // a label from the id, so every existing catalog byte is unchanged.
       ...('label' in operation && typeof operation.label === 'string'
@@ -1167,6 +1193,7 @@ function operationCatalogPayload(
                 : undefined,
               compilerSemanticProfileVersion,
               'booking' in operation ||
+                openItems.operations.has(operation.operationId) ||
                 argumentOperations.has(operation.operationId),
               templateOperations.has(operation.operationId),
               'entity' in operation.effect
@@ -1178,6 +1205,9 @@ function operationCatalogPayload(
                       operation.effect.entity.targetId,
                     ),
                     totalled: lineTotals.totalled.get(
+                      operation.effect.entity.targetId,
+                    ),
+                    protectedIds: openItems.protectedFields.get(
                       operation.effect.entity.targetId,
                     ),
                   }
@@ -2632,10 +2662,27 @@ function verificationPlanPayload(
   const materializedStateFieldIds = new Set(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
+  // OPEN-ITEM-1: the same shape for an open item's core-written figures and
+  // number. No create populates them (they leave every input; the core writes
+  // them at issue), so a probe through the create has no contract to probe.
+  // An application type has no create at all: only the core writes it.
+  const openItems = openItemsOf(packageRevision);
+  const coreWrittenFieldIds = new Set(
+    [...openItems.protectedFields.values()].flatMap((fields) => [...fields]),
+  );
+  const coreWrittenEntityIds = new Set(
+    [...openItems.operations.values()].flatMap((binding) =>
+      binding.bindingVersion === 'openItem.apply/v1'
+        ? [binding.application.entityId]
+        : [],
+    ),
+  );
   for (const field of packageRevision.fields.filter(
     (entry) =>
       entry.lifecycle === 'active' &&
-      !materializedStateFieldIds.has(entry.fieldId),
+      !materializedStateFieldIds.has(entry.fieldId) &&
+      !coreWrittenFieldIds.has(entry.fieldId) &&
+      !coreWrittenEntityIds.has(entry.entity.targetId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({
@@ -2668,7 +2715,9 @@ function verificationPlanPayload(
   }
   for (const relation of packageRevision.relations.filter(
     (entry) =>
-      entry.lifecycle === 'active' && entry.archiveBehavior === 'restrict',
+      entry.lifecycle === 'active' &&
+      entry.archiveBehavior === 'restrict' &&
+      !coreWrittenEntityIds.has(entry.sourceEntity.targetId),
   )) {
     addScenario({
       entityId: relation.sourceEntity.targetId,
@@ -2680,7 +2729,10 @@ function verificationPlanPayload(
     });
   }
   for (const query of packageRevision.queries.filter(
-    (entry) => entry.lifecycle === 'active' && entry.queryType === 'resolve',
+    (entry) =>
+      entry.lifecycle === 'active' &&
+      entry.queryType === 'resolve' &&
+      !coreWrittenEntityIds.has(entry.sourceEntity.targetId),
   )) {
     addScenario({
       entityId: query.sourceEntity.targetId,
@@ -2691,7 +2743,8 @@ function verificationPlanPayload(
     });
   }
   for (const entity of packageRevision.entities.filter(
-    (entry) => entry.lifecycle === 'active',
+    (entry) =>
+      entry.lifecycle === 'active' && !coreWrittenEntityIds.has(entry.entityId),
   )) {
     addScenario({
       entityId: entity.entityId,
@@ -2724,6 +2777,8 @@ function operationInputContract(
     readonly derived?: readonly CompiledDerivedField[] | undefined;
     readonly createOnly?: readonly string[] | undefined;
     readonly totalled?: readonly CompiledTotalledRelation[] | undefined;
+    /** OPEN-ITEM-1: core-written role fields, out of every input. */
+    readonly protectedIds?: ReadonlySet<string> | undefined;
   },
 ): unknown {
   const effectKind = operation.effect.kind;
@@ -2749,11 +2804,13 @@ function operationInputContract(
     (field) =>
       !numberingOf(field) &&
       !derivedIds.has(field.fieldId) &&
-      !createOnlyIds.has(field.fieldId),
+      !createOnlyIds.has(field.fieldId) &&
+      !lineTotals.protectedIds?.has(field.fieldId),
   );
+  // A number assigned at issue (OPEN-ITEM-1) is the core's, never a create's.
   const assignedFields = allFields.flatMap((field) => {
     const numbering = numberingOf(field);
-    return numbering
+    return numbering && !numbering.assignOn
       ? [
           {
             classification:

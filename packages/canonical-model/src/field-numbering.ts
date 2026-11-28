@@ -49,10 +49,26 @@ export function validateFieldNumbering(
     const id = String(field.fieldId);
     if (field.fieldType.kind !== 'textFieldType')
       fail(id, 'a document number is a text field');
-    if (field.presence !== 'required')
-      fail(id, 'a document number is required on every record');
-    if (field.businessKey !== 'tenantEnvironmentCaseInsensitiveUnique')
-      fail(id, 'a document number is a tenant-wide unique business key');
+    if (numbering.assignOn) {
+      // OPEN-ITEM-1: assigned at issue, counted per company. A draft has no
+      // number, so the field is optional; uniqueness is the issued-number
+      // ledger's (unique per company and series), not a tenant-wide key, so
+      // two companies may each issue PREFIX-000001. The compiler binds the
+      // transition to a declared open-item issue.
+      if (numbering.scope !== 'legalEntity')
+        fail(id, 'a number assigned at issue is counted per company');
+      if (field.presence === 'required')
+        fail(id, 'a number assigned at issue is absent on a draft');
+      if (field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique')
+        fail(id, 'a number assigned at issue carries no business key');
+    } else {
+      if (numbering.scope !== undefined)
+        fail(id, 'only a number assigned at issue names its series scope');
+      if (field.presence !== 'required')
+        fail(id, 'a document number is required on every record');
+      if (field.businessKey !== 'tenantEnvironmentCaseInsensitiveUnique')
+        fail(id, 'a document number is a tenant-wide unique business key');
+    }
     if (numbering.prefix === VERIFICATION_SENTINEL_PREFIX)
       fail(
         id,
