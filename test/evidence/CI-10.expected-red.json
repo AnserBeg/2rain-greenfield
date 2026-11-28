@@ -91,6 +91,60 @@
           "expected": "^Run unit tests$"
         }
       ]
+    },
+    {
+      "name": "ci10-range-scans-nothing",
+      "claim": "The docs-only security scan covers the pull request's own commits, from its base to HEAD.",
+      "file": ".github/scripts/run-security-scans.sh",
+      "original": "history_options=\"$range_base..HEAD\"",
+      "replacement": "history_options=\"HEAD..$range_base\"",
+      "test": {
+        "files": ["test/integration/security-scan-contract.test.ts"],
+        "namePattern": "scan runner pins the scanner and exercises a real negative Git fixture"
+      },
+      "kills": [
+        {
+          "file": "test/integration/security-scan-contract.test.ts",
+          "name": "scan runner pins the scanner and exercises a real negative Git fixture",
+          "expected": "the range scope scans the pull request commits"
+        }
+      ]
+    },
+    {
+      "name": "ci10-base-output-is-head",
+      "claim": "The selector writes the pull request base as the range base, so the scan cannot silently cover zero commits.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "\\nbase=${base ?? ''}\\n",
+      "replacement": "\\nbase=${head}\\n",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "CI-10: a docs-only pull request writes docs=true and its own base; code does not"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "CI-10: a docs-only pull request writes docs=true and its own base; code does not",
+          "expected": "the base output is the pull request base"
+        }
+      ]
+    },
+    {
+      "name": "ci10-extra-docs-gate",
+      "claim": "Only the listed quality steps carry a docs condition; gating any other step, such as the evidence upload, is refused.",
+      "file": ".github/workflows/ci.yml",
+      "original": "      - name: Retain quality executed-file evidence\n        uses:",
+      "replacement": "      - name: Retain quality executed-file evidence\n        if: needs.select.outputs.docs != 'true'\n        uses:",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: the docs flag skips only the steps a Markdown change cannot affect"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: the docs flag skips only the steps a Markdown change cannot affect",
+          "expected": "only the listed steps carry a docs condition"
+        }
+      ]
     }
   ]
 }

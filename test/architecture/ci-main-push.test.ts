@@ -356,3 +356,34 @@ test('three merges use one exact full on the tip and one row per packet tip', (t
       'missing packet row admitted',
     );
 });
+
+test('CI-10: a docs-only pull request writes docs=true and its own base; code does not', (t) => {
+  const { dir, git, commit, base, select } = repository(t);
+  git('checkout', '-qb', 'feature');
+  const output = () => {
+    const text = readFileSync(join(dir, 'output'), 'utf8');
+    const last = (key: string) =>
+      [...text.matchAll(new RegExp(`^${key}=(.*)$`, 'gmu'))].at(-1)?.[1];
+    return { docs: last('docs'), base: last('base') };
+  };
+  const event = {
+    pull_request: {
+      base: { sha: base },
+      head: {
+        ref: 'feature',
+        repo: { full_name: process.env.GITHUB_REPOSITORY },
+      },
+    },
+  };
+  commit('docs/notes.md', 'a note');
+  assert.equal(select(event, 'feature', 'pull_request').tier, 'quick');
+  assert.deepEqual(
+    output(),
+    { docs: 'true', base },
+    'the base output is the pull request base',
+  );
+  // A test file stays quick but is not a document.
+  commit('test/unit/example.test.ts', 'export {};');
+  assert.equal(select(event, 'feature', 'pull_request').tier, 'quick');
+  assert.equal(output().docs, 'false');
+});

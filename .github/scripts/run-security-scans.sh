@@ -42,8 +42,8 @@ case "$history_scope" in
       "$history_scope" "$total_commits"
     ;;
   range)
-    # CI-10: a docs-only pull request scans only the commits it adds. Its base
-    # is an ancestor already scanned by main's full-history runs.
+    # CI-10: a docs-only pull request scans only the commits it adds after its
+    # base. When the base is main, main's full-history runs covered it.
     range_base=${SECURITY_RANGE_BASE:?range scope needs SECURITY_RANGE_BASE}
     git merge-base --is-ancestor "$range_base" HEAD
     history_options="$range_base..HEAD"

@@ -94,10 +94,10 @@ export function selectPaths(changes) {
       path === 'apps/web/test/surface-runtime-contract.test.ts'
     ) {
       files.add(path);
-    } else if (/^docs\/(?:[\w.-]+\/)*[\w.-]+\.md$/u.test(path)) {
+    } else if (documentPath(path)) {
       for (const [prefix, tests] of documentReaders)
         if (path.startsWith(prefix)) for (const test of tests) files.add(test);
-    } else if (!['README.md', 'learnings.md'].includes(path)) {
+    } else {
       return { tier: 'full', reason: path };
     }
   }

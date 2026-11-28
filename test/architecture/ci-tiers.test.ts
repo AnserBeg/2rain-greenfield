@@ -651,6 +651,17 @@ test('CI-10: every unit or compiler reader of a Markdown document is in document
           )
         )
           unlisted.push(`${file} reads ${document}`);
+      // A directory, a computed path or a path built with join() is a reader
+      // too; only a named non-Markdown file is exempt.
+      for (const [, fragment = ''] of readFileSync(file, 'utf8').matchAll(
+        /['"`](docs(?:\/[^'"`\n]*)?)['"`]/gu,
+      ))
+        if (
+          !/\.(?!md$)\w+$/u.test(fragment) &&
+          !fragment.endsWith('.md') &&
+          !readers.some(([, tests]) => tests.includes(file))
+        )
+          unlisted.push(`${file} reads ${fragment}`);
     }
   assert.deepEqual(unlisted, []);
 });
@@ -728,6 +739,26 @@ test('CI-10: the docs flag skips only the steps a Markdown change cannot affect'
       name,
     );
   }
+  assert.deepEqual(
+    [...steps]
+      .filter(([, body]) => /^ {8}if: .*outputs\.docs/mu.test(body ?? ''))
+      .map(([name]) => name)
+      .sort(),
+    [
+      'Build',
+      'Check compiled application release freshness',
+      'Check compiled demo release freshness',
+      'Check mutation manifests still name live production text',
+      'Check the record layer',
+      'Lint',
+      'Prove the expected-red gate can fail',
+      'Retain compiled scaffold',
+      'Run compiler tests',
+      'Run unit tests',
+      'Typecheck',
+    ],
+    'only the listed steps carry a docs condition',
+  );
   assert.match(
     steps.get('Run the selected node tests') ?? '',
     /CI_DOCS: \$\{\{ needs\.select\.outputs\.docs \}\}/u,
