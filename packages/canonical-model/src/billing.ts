@@ -346,10 +346,11 @@ export const BillingPlanSchema = z
             issue('Advance billing requires an interval or service-use source');
           // Without a declared early return, service use holds the service
           // open to the agreed end, so cycles after a return would keep
-          // opening at the full fee (no commitment was declared).
-          if (
-            source === 'bookingActuals' ||
-            (arrears?.kind === 'evidenceQuery' && !arrears.earlyReturn)
+          // opening at the full fee (no commitment was declared). The
+          // persisted reader-45 form declares none either.
+          else if (
+            source !== 'agreedInterval' &&
+            !(arrears?.kind === 'evidenceQuery' && arrears.earlyReturn)
           )
             issue('Advance on service use requires a declared early return');
         }
