@@ -762,8 +762,8 @@
       "name": "billing-rules-version-selection",
       "claim": "A plan with a rule key is quoted under calculation v4, and calculate refuses it under any other version.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "    hasBillingRules(planInput)",
-      "replacement": "    false",
+      "original": "    : hasBillingRules(plan)\n      ? BILLING_RULES_CALCULATION\n      : otherwise;",
+      "replacement": "    : hasBillingRules(plan)\n      ? otherwise\n      : otherwise;",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
@@ -906,8 +906,8 @@
       "name": "billing-early-return-last-return",
       "claim": "Committed early-return time runs from the last return to the service end, never the agreed interval in full (120 under agreedEnd, 180 under a one-week minimum, for a day-one pickup).",
       "file": "packages/domain/src/billing/arrears.ts",
-      "original": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n    );",
-      "replacement": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
+      "original": "        advance.length ? evidence.asOf : cycle!.end,\n        evidence.serviceEnd,\n      ),\n    );",
+      "replacement": "        advance.length ? evidence.asOf : cycle!.end,\n        evidence.serviceEnd,\n      ),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B9: committed time runs from the last return, not from pickup$"
@@ -971,6 +971,212 @@
           "file": "test/postgres/billing-terms.test.ts",
           "name": "the quote and terms permissions are bound by their declared role, not by name",
           "expected": "two bound plans share the quote and terms grants"
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-agreed-not-elapsed",
+      "claim": "An advance fee bills the opened cycle on agreed coverage, not on time elapsed at the review.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "const ms = covered(advanceCoverage, o.start, o.fullEnd);",
+      "replacement": "const ms = covered(advanceCoverage, o.start, Math.min(o.fullEnd, asOf));",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time",
+          "expected": "\\+ +'0'\\n- +'21000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-keep-paid-period",
+      "claim": "keepPaidPeriod: an early return never reduces an opened cycle; it is rated on the agreed interval kept before actual use moves the service end, also through the released quote query.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "{ start: anchor, end: agreedEnd },",
+      "replacement": "{ start: anchor, end: anchor },",
+      "test": {
+        "files": [
+          "test/integration/billing-rules.test.ts",
+          "test/postgres/billing-terms.test.ts"
+        ],
+        "namePattern": "^(B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it|an advance fee bills its opened cycles on the agreed interval through the released quote query, and an early return keeps them)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it",
+          "expected": "\\+ +'11129'\\n- +'30000'"
+        },
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "an advance fee bills its opened cycles on the agreed interval through the released quote query, and an early return keeps them",
+          "expected": "- +'3000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-final-no-rerate",
+      "claim": "An opened advance cycle keeps its amount when it closes; it is never re-rated on the arrears coverage.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "const ms = covered(advanceCoverage, o.start, o.fullEnd);",
+      "replacement": "const ms = covered(o.fullEnd <= asOf ? coverage.eligible : advanceCoverage, o.start, o.fullEnd);",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: an opened advance cycle is not rated again when it closes$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: an opened advance cycle is not rated again when it closes",
+          "expected": "\\+ +'0'\\n- +'30000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-no-cycle-after-end",
+      "claim": "No advance cycle opens at or after the service end.",
+      "file": "packages/domain/src/billing/occurrences.ts",
+      "original": "(o) => o.start <= asOf && (serviceEnd === null || o.start < serviceEnd),",
+      "replacement": "(o) => o.start <= asOf,",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it",
+          "expected": "'2027-08-01T06:00:00.000Z',\\n\\+ +'30000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-late-review",
+      "claim": "A late first review owes every opened cycle, not only the cycle containing the review instant.",
+      "file": "packages/domain/src/billing/occurrences.ts",
+      "original": "(o) => o.start <= asOf && (serviceEnd === null || o.start < serviceEnd),",
+      "replacement": "(o) =>\n      o.start <= asOf &&\n      asOf < o.fullEnd &&\n      (serviceEnd === null || o.start < serviceEnd),",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: a late first review still owes every opened cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: a late first review still owes every opened cycle",
+          "expected": "\\+ \\[\\]\\n- \\["
+        }
+      ]
+    },
+    {
+      "name": "billing-advance-arrears-closed-only",
+      "claim": "Only a fee declared in advance bills an open cycle; an arrears fee in the same plan stays closed-cycle only.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "c.timing?.when === 'advance'",
+      "replacement": "c.timing !== undefined",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: arrears fees and one-offs in an advance plan stay closed-cycle only$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: arrears fees and one-offs in an advance plan stay closed-cycle only",
+          "expected": "\\+ +'fuel',"
+        }
+      ]
+    },
+    {
+      "name": "billing-timing-unstated",
+      "claim": "No implicit timing under v5: a plan that states timing on one component states it on every time and recurring fixed component.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "          issue(\n            'A plan that states billing timing states it on every component',\n          );",
+      "replacement": "          void 'A plan that states billing timing states it on every component';",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: timing refusals \\(unstated, suspend, prorateAndRefund, advance outside a recurring fee\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
+          "expected": "an unstated recurring fee beside a timed one"
+        }
+      ]
+    },
+    {
+      "name": "billing-timing-absent-pause",
+      "claim": "An advance fee must say continue during a pause; absent means suspend and is refused.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "if (c.occurrence.fixedFeeDuringPause !== 'continue')",
+      "replacement": "if (c.occurrence.fixedFeeDuringPause === 'suspend')",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: timing refusals \\(unstated, suspend, prorateAndRefund, advance outside a recurring fee\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
+          "expected": "advance with a suspending pause: absent"
+        }
+      ]
+    },
+    {
+      "name": "billing-timing-advance-time",
+      "claim": "Advance on a time component is refused until slice (e) rates it.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "if (c.kind === 'time') issue('Advance time billing is not admitted');",
+      "replacement": "if (c.kind === 'time') void 'Advance time billing is not admitted';",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: timing refusals \\(unstated, suspend, prorateAndRefund, advance outside a recurring fee\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
+          "expected": "advance on a time component"
+        }
+      ]
+    },
+    {
+      "name": "billing-timing-version-gate",
+      "claim": "A timed plan is rated only under calculation v5, and an untimed plan never under v5.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "if (timed !== (algorithm === BILLING_TIMING_CALCULATION))",
+      "replacement": "if (timed !== timed && algorithm === BILLING_TIMING_CALCULATION)",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: timing selects calculation v5 and the timing reader; plans without it keep their bytes$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: timing selects calculation v5 and the timing reader; plans without it keep their bytes",
+          "expected": "Billing replay digest mismatch"
+        }
+      ]
+    },
+    {
+      "name": "billing-timing-service-use-early-return",
+      "claim": "Advance on a service-use source requires a declared early return; without one, cycles after a return would keep opening at the full fee.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "            source !== 'agreedInterval' &&\n            !(arrears?.kind === 'evidenceQuery' && arrears.earlyReturn)",
+      "replacement": "            source !== 'agreedInterval' &&\n            arrears?.kind !== 'evidenceQuery' &&\n            !arrears?.earlyReturn",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: advance on service use requires a declared early return$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: advance on service use requires a declared early return",
+          "expected": "an evidence source with no early return"
         }
       ]
     }

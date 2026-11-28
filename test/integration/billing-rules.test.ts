@@ -5,10 +5,14 @@ import {
   BILLING_CYCLE_CALCULATION,
   BILLING_RULES_CALCULATION,
   BILLING_RULES_READER,
+  BILLING_TIMING_CALCULATION,
+  BILLING_TIMING_READER,
   BillingPlanSchema,
   billingEvidenceQuery,
   billingReleaseMismatch,
+  billingReleaseTerms,
   hasBillingRules,
+  hasBillingTiming,
 } from '../../packages/canonical-model/src/billing.js';
 import type { BillingQuoteEvidence } from '../../packages/canonical-model/src/billing-evidence.js';
 import {
@@ -21,6 +25,7 @@ import {
   reviewArrearsCharges,
 } from '../../packages/domain/src/billing/arrears.js';
 import {
+  quoteBillingCycle,
   quoteBillingService,
   replayBillingQuote,
 } from '../../packages/domain/src/billing/quote.js';
@@ -466,7 +471,7 @@ function earlyReview(
   );
   return {
     status: result.status,
-    end: result.cycle.end,
+    end: result.cycle!.end,
     cents: result.quote.lines.map((l) => l.differenceCents).join(),
   };
 }
@@ -962,4 +967,583 @@ test('B7: the agreed band reads the record quantity field, 1 when none is bound'
   assert.equal(agreedQuantity({ seats: '5' }, undefined), '1');
   assert.equal(agreedQuantity({ seats: null }, 'seats'), undefined);
   assert.equal(agreedQuantity({}, 'seats'), undefined);
+});
+
+// ---- BILLING-1 slice 3a-ii-a: a recurring fixed fee billed in advance (B2) ----
+// E1: CAD 300 a month, calendar months, advance, active coverage, agreed from
+// Jun 10 2027 (Edmonton midnight), open-ended.
+const e1Start = '2027-06-10T06:00:00.000Z';
+const july = '2027-07-01T06:00:00.000Z',
+  august = '2027-08-01T06:00:00.000Z';
+const e1Return = '2027-07-12T18:00:00.000Z';
+type Timing = { when: 'advance' | 'arrears'; earlyEnd?: string };
+function feeComponent(
+  id: string,
+  amount: string,
+  timing: Timing | undefined,
+  pause: 'continue' | 'suspend' | 'absent' = 'continue',
+) {
+  return {
+    kind: 'fixed',
+    id,
+    base: 'enrollment',
+    stage: 'afterCapBeforeTax',
+    taxClassification: 'untaxed',
+    amount,
+    ...(timing && { timing }),
+    occurrence: {
+      kind: 'recurring',
+      cadence: { kind: 'calendarMonth', boundaryMinutes: 0 },
+      ...(pause !== 'absent' && { fixedFeeDuringPause: pause }),
+    },
+  };
+}
+const advance: Timing = { when: 'advance' };
+function advancePlan(
+  options: {
+    source?: 'agreed' | 'use' | 'none' | 'meter';
+    components?: Authored[];
+    slots?: string[];
+  } = {},
+) {
+  const { source = 'agreed' } = options;
+  const components = options.components ?? [
+    feeComponent('rent', 'rent', advance),
+  ];
+  const slots = options.slots ?? ['rent'];
+  return {
+    schemaVersion: 'v6',
+    id: 'lease',
+    version: '1',
+    currency: 'CAD',
+    serviceUnit: 'each',
+    schedule: { kind: 'calendarMonth', boundaryMinutes: 0 },
+    slots: slots.map((id) => ({
+      id,
+      kind: 'money',
+      currency: 'CAD',
+      scale: 2,
+    })),
+    components,
+    ...(source !== 'none' && {
+      bindings: {
+        quoteQueryId: 'quote',
+        evidenceQueryId: 'source',
+        agreedInterval: {
+          customerFieldId: 'customer',
+          currencyFieldId: 'currency',
+          startFieldId: 'start',
+          endFieldId: 'end',
+          zone: 'America/Edmonton',
+        },
+        arrearsSource:
+          source === 'agreed'
+            ? { kind: 'agreedInterval' }
+            : source === 'meter'
+              ? {
+                  kind: 'periodMeter',
+                  streamId: 's',
+                  unit: 'u',
+                  openingReadingFieldId: 'a',
+                  closingReadingFieldId: 'b',
+                  openingInstantFieldId: 'c',
+                  closingInstantFieldId: 'd',
+                }
+              : {
+                  kind: 'evidenceQuery',
+                  queryId: 'usage',
+                  protocol: SERVICE_USE_PROTOCOL,
+                  subjectId: subject,
+                  earlyReturn: { bill: 'actualEnd' },
+                },
+        publishOperationId: 'publish',
+        overrideOperationId: 'override',
+        assignmentOperationId: 'assign',
+        termsQueryId: 'terms',
+        termsFieldId: 'termsField',
+      },
+    }),
+  };
+}
+function e1Evidence(
+  planInput: unknown,
+  asOf: string,
+  end: string | null = null,
+  values: Record<string, string> = { rent: '300' },
+): BillingQuoteEvidence {
+  return {
+    ...evidence(planInput, 1, values),
+    anchor: e1Start,
+    periodStart: e1Start,
+    asOf,
+    serviceEnd: end,
+    bands: [
+      {
+        id: 'band',
+        quantity: '1',
+        intervals: [{ id: 'leg', revision: '1', start: e1Start, end }],
+      },
+    ],
+  };
+}
+// Each line as [component, service period start, cents].
+function reviewLines(review: ReturnType<typeof reviewArrearsCharges>) {
+  assert.equal(review.status, 'due');
+  assert.equal(review.quote.algorithm, BILLING_TIMING_CALCULATION);
+  assert.equal(
+    replayBillingQuote(review.quote).resultDigest,
+    review.quote.resultDigest,
+  );
+  return review.quote.lines.map((l) => [
+    l.componentId,
+    l.servicePeriodStart,
+    l.differenceCents,
+  ]);
+}
+const agreedReview = (asOf: string, end: string | null = null) =>
+  reviewLines(
+    reviewArrearsCharges(
+      compileRatePlan(advancePlan()).plan,
+      e1Evidence(advancePlan(), asOf, end),
+    ),
+  );
+
+test('B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time', () => {
+  // E1 on Jun 10: 21 of June's 30 days, before any cycle has closed.
+  const opened = reviewArrearsCharges(
+    compileRatePlan(advancePlan()).plan,
+    e1Evidence(advancePlan(), e1Start),
+  );
+  assert.equal(opened.status, 'due');
+  assert.equal(opened.cycle, null);
+  assert.deepEqual(reviewLines(opened), [['rent', e1Start, '21000']]);
+  assert.deepEqual(agreedReview('2027-06-15T06:00:00.000Z'), [
+    ['rent', e1Start, '21000'],
+  ]);
+  // Jul 1: July opens in full; June keeps its amount.
+  assert.deepEqual(agreedReview(july), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+  ]);
+  // Before the agreed start nothing is owed.
+  assert.equal(
+    reviewArrearsCharges(
+      compileRatePlan(advancePlan()).plan,
+      e1Evidence(advancePlan(), '2027-06-09T06:00:00.000Z'),
+    ).status,
+    'notDue',
+  );
+  // An agreed end inside a cycle prorates that cycle (Aug 1 to Aug 20).
+  assert.deepEqual(agreedReview(august, '2027-08-20T06:00:00.000Z'), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '18387'],
+  ]);
+});
+
+test('B2: an opened advance cycle is not rated again when it closes', () => {
+  for (const asOf of [july, '2027-07-20T06:00:00.000Z', august])
+    assert.deepEqual(agreedReview(asOf).slice(0, 2), [
+      ['rent', e1Start, '21000'],
+      ['rent', july, '30000'],
+    ]);
+});
+
+// The service-use journey: actual use sets the service end (actualEnd).
+function e1Snapshot(returned: string | null, asOf: string) {
+  return bookingServiceUse({
+    schemaVersion: 'booking.ownerUsage/v1',
+    ownerRef: { entityId: owner.entityId, recordId: owner.recordId },
+    ownerScope: { kind: 'company', companyId: owner.companyId },
+    asOf,
+    cursor: '4',
+    highWater: '4',
+    hasMore: false,
+    changes: [],
+    bookings: [
+      {
+        bookingId: 'b1',
+        slotId: subject,
+        fulfilmentMode: 'tracked',
+        unit: 'each',
+      },
+    ],
+    evidence: [
+      {
+        id: 'use',
+        bookingId: 'b1',
+        revision: 1,
+        kind: 'use',
+        voided: false,
+        effectiveStart: e1Start,
+        effectiveEnd: returned,
+        quantity: '1',
+        unit: 'each',
+      },
+    ],
+  });
+}
+function useReview(
+  asOf: string,
+  returned: string | null = e1Return,
+  snapshotAsOf = asOf,
+  planInput: unknown = advancePlan({ source: 'use' }),
+) {
+  const plan = compileRatePlan(planInput).plan;
+  return reviewArrearsCharges(
+    plan,
+    { ...e1Evidence(planInput, asOf), bands: [] },
+    {
+      snapshot: e1Snapshot(returned, snapshotAsOf),
+      subjectId: subject,
+      owner,
+      earlyReturn: { bill: 'actualEnd' },
+    },
+  );
+}
+
+test('B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it', () => {
+  // Returned Jul 12: July stays 300.00 (total 510.00); August never opens.
+  for (const asOf of [
+    '2027-07-12T19:00:00.000Z',
+    august,
+    '2027-09-15T06:00:00.000Z',
+  ])
+    assert.deepEqual(reviewLines(useReview(asOf)), [
+      ['rent', e1Start, '21000'],
+      ['rent', july, '30000'],
+    ]);
+  // While the equipment is out, July is owed from its first instant.
+  assert.deepEqual(reviewLines(useReview(july, null)), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+  ]);
+});
+
+test('B2: a late first review still owes every opened cycle', () => {
+  // First reviewed on Aug 5, after the Jul 12 return: June and July, never August.
+  const late = useReview('2027-08-05T06:00:00.000Z');
+  assert.equal(late.status, 'due');
+  assert.deepEqual(late.status === 'due' && late.advance?.map((c) => c.start), [
+    e1Start,
+    july,
+  ]);
+  assert.deepEqual(reviewLines(late), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+  ]);
+});
+
+test('B2: advance reads actual use through the review instant', () => {
+  // A snapshot older than the review instant cannot say the service is open.
+  assert.throws(
+    () => useReview(august, null, '2027-07-31T06:00:00.000Z'),
+    /Incomplete service-use snapshot/,
+  );
+  // An overrun past the agreed end is billed on top of the agreed coverage:
+  // agreed to Jul 15, still out on Aug 10, so July is whole and August has
+  // nine of its 31 days so far.
+  const planInput = advancePlan({ source: 'use' });
+  const plan = compileRatePlan(planInput).plan;
+  const overrun = reviewArrearsCharges(
+    plan,
+    {
+      ...e1Evidence(
+        planInput,
+        '2027-08-10T06:00:00.000Z',
+        '2027-07-15T06:00:00.000Z',
+      ),
+      bands: [],
+    },
+    {
+      snapshot: e1Snapshot(null, '2027-08-10T06:00:00.000Z'),
+      subjectId: subject,
+      owner,
+      earlyReturn: { bill: 'actualEnd' },
+    },
+  );
+  assert.deepEqual(reviewLines(overrun), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '8710'],
+  ]);
+});
+
+test('B2: arrears fees and one-offs in an advance plan stay closed-cycle only', () => {
+  const planInput = advancePlan({
+    slots: ['rent', 'fuel', 'setup'],
+    components: [
+      feeComponent('rent', 'rent', advance),
+      feeComponent('fuel', 'fuel', { when: 'arrears' }),
+      {
+        kind: 'fixed',
+        id: 'setup',
+        base: 'enrollment',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        amount: 'setup',
+        occurrence: { kind: 'oneOff', at: 'serviceStart' },
+      },
+    ],
+  });
+  const plan = compileRatePlan(planInput).plan;
+  const review = (asOf: string) =>
+    reviewLines(
+      reviewArrearsCharges(
+        plan,
+        e1Evidence(planInput, asOf, null, {
+          rent: '300',
+          fuel: '50',
+          setup: '25',
+        }),
+      ),
+    );
+  // Jun 15: only the advance fee; nothing has closed.
+  assert.deepEqual(review('2027-06-15T06:00:00.000Z'), [
+    ['rent', e1Start, '21000'],
+  ]);
+  // Jul 15: June closed, so June's fuel and the set-up fee; July's fuel is
+  // not billed while July is open.
+  assert.deepEqual(review('2027-07-15T06:00:00.000Z'), [
+    ['fuel', e1Start, '3500'],
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['setup', e1Start, '2500'],
+  ]);
+});
+
+test('B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)', () => {
+  const refused = (planInput: unknown, message: RegExp, reason: string) => {
+    const parsed = BillingPlanSchema.safeParse(planInput);
+    assert.equal(parsed.success, false, reason);
+    assert.match(JSON.stringify(parsed.error?.issues), message, reason);
+  };
+  refused(
+    advancePlan({
+      slots: ['rent', 'fuel'],
+      components: [
+        feeComponent('rent', 'rent', advance),
+        feeComponent('fuel', 'fuel', undefined),
+      ],
+    }),
+    /states it on every component/,
+    'an unstated recurring fee beside a timed one',
+  );
+  refused(
+    advancePlan({
+      slots: ['rent', 'd'],
+      components: [
+        feeComponent('rent', 'rent', advance),
+        { ...timePlan({}, { day: 'd' }).components[0] },
+      ],
+    }),
+    /states it on every component/,
+    'an unstated time component beside a timed fee',
+  );
+  for (const pause of ['suspend', 'absent'] as const)
+    refused(
+      advancePlan({
+        components: [feeComponent('rent', 'rent', advance, pause)],
+      }),
+      /continues during a pause/,
+      'advance with a suspending pause: ' + String(pause),
+    );
+  refused(
+    advancePlan({
+      components: [
+        feeComponent('rent', 'rent', {
+          when: 'advance',
+          earlyEnd: 'prorateAndRefund',
+        }),
+      ],
+    }),
+    /customer credit balances/,
+    'prorateAndRefund',
+  );
+  refused(
+    advancePlan({
+      slots: ['d'],
+      components: [
+        { ...timePlan({}, { day: 'd' }).components[0], timing: advance },
+      ],
+    }),
+    /Advance time billing/,
+    'advance on a time component',
+  );
+  refused(
+    advancePlan({
+      components: [
+        {
+          ...feeComponent('rent', 'rent', undefined),
+          timing: advance,
+          occurrence: { kind: 'oneOff', at: 'serviceStart' },
+        },
+      ],
+    }),
+    /one-off fee has no billing timing/,
+    'advance on a one-off',
+  );
+  for (const source of ['none', 'meter'] as const)
+    refused(
+      advancePlan({ source }),
+      /interval or service-use source/,
+      'advance without a cycle source: ' + source,
+    );
+  refused(
+    advancePlan({
+      slots: ['rent', 'fuel'],
+      components: [
+        feeComponent('rent', 'rent', advance),
+        feeComponent('fuel', 'fuel', {
+          when: 'arrears',
+          earlyEnd: 'keepPaidPeriod',
+        }),
+      ],
+    }),
+    /early-end rule applies only to an advance component/,
+    'an early-end rule on an arrears component',
+  );
+  // A meter declares no timing at all.
+  const meterPlan = advancePlan({
+    slots: ['rent', 'rate', 'included'],
+    components: [
+      feeComponent('rent', 'rent', advance),
+      {
+        id: 'overage',
+        kind: 'meter',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        streamId: 'copies',
+        unit: 'copy',
+        overageRate: 'rate',
+        timing: advance,
+        allowanceBasis: { kind: 'perCycle', quantity: 'included' },
+      },
+    ],
+  });
+  assert.equal(BillingPlanSchema.safeParse(meterPlan).success, false);
+  // A stated arrears time component beside an advance fee is admitted.
+  assert.equal(
+    BillingPlanSchema.safeParse(
+      advancePlan({
+        slots: ['rent', 'd'],
+        components: [
+          feeComponent('rent', 'rent', advance),
+          {
+            ...timePlan({}, { day: 'd' }).components[0],
+            timing: { when: 'arrears' },
+          },
+        ],
+      }),
+    ).success,
+    true,
+  );
+});
+
+test('B2: advance on service use requires a declared early return', () => {
+  // Without one, service use holds the service open to the agreed end, so
+  // an advance fee would keep opening whole cycles after the return (agreed
+  // Jun 10 to Aug 31, returned Jul 12: August 300.00 with no commitment).
+  const use = advancePlan({ source: 'use' }) as {
+    bindings: { arrearsSource: Record<string, unknown> };
+  };
+  assert.equal(BillingPlanSchema.safeParse(use).success, true);
+  const withoutRule = { ...use.bindings.arrearsSource };
+  delete withoutRule.earlyReturn;
+  for (const [reason, arrearsSource] of [
+    ['an evidence source with no early return', withoutRule],
+    [
+      'the persisted Booking source',
+      { kind: 'bookingActuals', queryId: 'usage', slotId: subject },
+    ],
+  ] as const) {
+    const parsed = BillingPlanSchema.safeParse({
+      ...use,
+      bindings: { ...use.bindings, arrearsSource },
+    });
+    assert.equal(parsed.success, false, reason);
+    assert.match(
+      JSON.stringify(parsed.error?.issues),
+      /requires a declared early return/,
+      reason,
+    );
+  }
+});
+
+test('B2: timing selects calculation v5 and the timing reader; plans without it keep their bytes', () => {
+  const timed = advancePlan();
+  const untimed = advancePlan({
+    components: [feeComponent('rent', 'rent', undefined)],
+  });
+  assert.equal(hasBillingTiming(timed), true);
+  assert.equal(hasBillingTiming(untimed), false);
+  // No timing key is added by normalization, so the digest is unchanged.
+  assert.equal('timing' in compileRatePlan(untimed).plan.components[0]!, false);
+  assert.deepEqual(billingReleaseTerms([timed]), {
+    agreed: true,
+    calculation: BILLING_TIMING_CALCULATION,
+    floor: BILLING_TIMING_READER,
+  });
+  assert.deepEqual(billingReleaseTerms([untimed]), {
+    agreed: true,
+    calculation: BILLING_CYCLE_CALCULATION,
+    floor: BILLING_ARREARS_READER,
+  });
+  // The previous reader refuses a v5 plan by name.
+  const payload = {
+    billingPlans: [timed],
+    billingCalculationVersion: BILLING_TIMING_CALCULATION,
+  };
+  assert.equal(
+    billingReleaseMismatch([timed], payload, BILLING_TIMING_READER),
+    false,
+  );
+  assert.equal(
+    billingReleaseMismatch([timed], payload, BILLING_RULES_READER),
+    true,
+  );
+  assert.equal(
+    billingReleaseMismatch(
+      [timed],
+      { ...payload, billingCalculationVersion: BILLING_RULES_CALCULATION },
+      BILLING_TIMING_READER,
+    ),
+    true,
+  );
+  // A timed plan is never rated under v4, and an untimed plan never under v5.
+  const plan = compileRatePlan(timed).plan;
+  const review = reviewArrearsCharges(plan, e1Evidence(timed, july));
+  assert.equal(review.status, 'due');
+  assert.throws(
+    () =>
+      replayBillingQuote({
+        ...review.quote,
+        algorithm: BILLING_RULES_CALCULATION,
+      }),
+    /calculation v5/,
+  );
+  const untimedReview = reviewArrearsCharges(
+    compileRatePlan(untimed).plan,
+    e1Evidence(untimed, july),
+  );
+  assert.equal(untimedReview.status, 'due');
+  assert.equal(untimedReview.quote.algorithm, BILLING_CYCLE_CALCULATION);
+  assert.equal('advance' in untimedReview, false);
+  assert.throws(
+    () =>
+      replayBillingQuote({
+        ...untimedReview.quote,
+        algorithm: BILLING_TIMING_CALCULATION,
+      }),
+    /calculation v5/,
+  );
+  // An advance fee is rated only in a cycle review with its agreed end.
+  assert.throws(
+    () => quoteBillingService(timed, e1Evidence(timed, july)),
+    /cycle review and its agreed end/,
+  );
+  assert.throws(
+    () => quoteBillingCycle(plan, e1Evidence(timed, july), july),
+    /cycle review and its agreed end/,
+  );
 });

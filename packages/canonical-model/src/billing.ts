@@ -14,6 +14,11 @@ export const BILLING_CYCLE_CALCULATION = 'northstar.billing-calculation/v3';
  * and its earlier reader. Provisional: renumbered at merge. */
 export const BILLING_RULES_READER = 54;
 export const BILLING_RULES_CALCULATION = 'northstar.billing-calculation/v4';
+/** Per-component timing (B2): a recurring fixed fee may bill in advance under
+ * keepPaidPeriod. A plan that states no timing keeps v2-v4 and its earlier
+ * reader. Assigned at TRAIN-Z (55 is WORKFLOW-3 s1). */
+export const BILLING_TIMING_READER = 56;
+export const BILLING_TIMING_CALCULATION = 'northstar.billing-calculation/v5';
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [
@@ -31,6 +36,16 @@ const civilPeriod = z.enum(['day', 'week', 'fourWeek', 'month']);
 const proration = z.enum(['activeCoverage', 'none']);
 const periodSlots = z.partialRecord(period, id);
 const common = { id, taxClassification: id };
+// B2. Absent means arrears, so v2-v4 bytes replay unchanged; a plan that
+// states timing on any component states it on every time and recurring fixed
+// component. earlyEnd absent means keepPaidPeriod: no opened cycle is
+// refunded. prorateAndRefund waits for customer credit balances.
+const timing = z
+  .strictObject({
+    when: z.enum(['advance', 'arrears']),
+    earlyEnd: z.enum(['keepPaidPeriod', 'prorateAndRefund']).optional(),
+  })
+  .optional();
 const cadence = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('anniversary'),
@@ -89,6 +104,7 @@ const component = z.discriminatedUnion('kind', [
     // rata? Absent rates are whole under bestPrice and ladder, and pro rata
     // under prorate.
     partial: z.partialRecord(period, z.enum(['whole', 'prorate'])).optional(),
+    timing,
   }),
   z.strictObject({
     ...common,
@@ -98,6 +114,7 @@ const component = z.discriminatedUnion('kind', [
     amount: id,
     // The amount is per unit of the service's one commercial quantity.
     perQuantity: z.literal(true).optional(),
+    timing,
     occurrence: z.discriminatedUnion('kind', [
       z.strictObject({
         kind: z.literal('oneOff'),
@@ -293,6 +310,52 @@ export const BillingPlanSchema = z
       }
     }
     if (used.size !== slots.size) issue('Unused or unknown billing slots');
+    // B2 timing (calculation v5). Only a recurring fixed fee bills in advance
+    // in this slice; every other admitted key is rated.
+    if (plan.components.some((c) => c.kind !== 'meter' && c.timing)) {
+      const arrears = plan.bindings?.arrearsSource;
+      const source = arrears?.kind;
+      for (const c of plan.components) {
+        if (c.kind === 'meter') continue;
+        const t = c.timing;
+        if (c.kind === 'fixed' && c.occurrence.kind === 'oneOff') {
+          if (t) issue('A one-off fee has no billing timing');
+          continue;
+        }
+        if (!t) {
+          issue(
+            'A plan that states billing timing states it on every component',
+          );
+          continue;
+        }
+        if (t.earlyEnd === 'prorateAndRefund')
+          issue('prorateAndRefund requires customer credit balances');
+        if (t.when !== 'advance') {
+          // keepPaidPeriod governs an opened advance cycle; arrears never
+          // opens one, so the rule would be declared and never read.
+          if (t.earlyEnd !== undefined)
+            issue('An early-end rule applies only to an advance component');
+          continue;
+        }
+        if (c.kind === 'time') issue('Advance time billing is not admitted');
+        else if (c.occurrence.kind === 'recurring') {
+          // Suspending an advance fee during a pause would need a refund.
+          if (c.occurrence.fixedFeeDuringPause !== 'continue')
+            issue('An advance fee continues during a pause');
+          if (source === undefined || source === 'periodMeter')
+            issue('Advance billing requires an interval or service-use source');
+          // Without a declared early return, service use holds the service
+          // open to the agreed end, so cycles after a return would keep
+          // opening at the full fee (no commitment was declared). The
+          // persisted reader-45 form declares none either.
+          else if (
+            source !== 'agreedInterval' &&
+            !(arrears?.kind === 'evidenceQuery' && arrears.earlyReturn)
+          )
+            issue('Advance on service use requires a declared early return');
+        }
+      }
+    }
   });
 export const BillingPlansSchema = z
   .array(BillingPlanSchema)
@@ -399,6 +462,13 @@ export function hasBillingRules(plan: unknown): boolean {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** Whether a plan states per-component timing (calculation v5 and the timing
+ * reader). It reads the stored JSON shape, as hasBillingRules does. */
+export function hasBillingTiming(plan: unknown): boolean {
+  if (!isRecord(plan) || !Array.isArray(plan.components)) return false;
+  return plan.components.some((c) => isRecord(c) && c.timing !== undefined);
+}
+
 /** The calculation version and reader floor a set of stored plans requires.
  * `calculation` is undefined when no plan binds an agreed interval. */
 export function billingReleaseTerms(plans: unknown) {
@@ -408,22 +478,27 @@ export function billingReleaseTerms(plans: unknown) {
   const agreed = bound('agreedInterval');
   const arrears = bound('arrearsSource');
   const rules = list.some(hasBillingRules);
+  const timed = list.some(hasBillingTiming);
   return {
     agreed,
     calculation: !agreed
       ? undefined
+      : timed
+        ? BILLING_TIMING_CALCULATION
+        : rules
+          ? BILLING_RULES_CALCULATION
+          : arrears
+            ? BILLING_CYCLE_CALCULATION
+            : BILLING_CALCULATION_VERSION,
+    floor: timed
+      ? BILLING_TIMING_READER
       : rules
-        ? BILLING_RULES_CALCULATION
+        ? BILLING_RULES_READER
         : arrears
-          ? BILLING_CYCLE_CALCULATION
-          : BILLING_CALCULATION_VERSION,
-    floor: rules
-      ? BILLING_RULES_READER
-      : arrears
-        ? BILLING_ARREARS_READER
-        : agreed
-          ? BILLING_ALLOCATION_READER
-          : BILLING_READER,
+          ? BILLING_ARREARS_READER
+          : agreed
+            ? BILLING_ALLOCATION_READER
+            : BILLING_READER,
   };
 }
 
@@ -460,6 +535,7 @@ export function billingReleaseMismatch(
         BILLING_ALLOCATION_READER,
         BILLING_ARREARS_READER,
         BILLING_RULES_READER,
+        BILLING_TIMING_READER,
       ].includes(surfaceFloor))
   );
 }

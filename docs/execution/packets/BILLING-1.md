@@ -107,6 +107,8 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
 
 Slice 3a-i built tasks 1 to 4 above and the B8 rename, B1 and B7 ([record](BILLING-1-s3a-i.md)). Task 4 is a ruling proposal there; the free-text meter unit in finding 5 stays open.
 
+Slice 3a-ii-a adds per-component timing: a recurring fixed fee billed in advance under keepPaidPeriod, calculation v5 ([record](BILLING-1-s3a-ii.md)). The minimum charge, discounts, percentage components and time in advance are later 3a-ii slices.
+
 ## Test it yourself
 
 Run `node --import tsx --test test/integration/billing-quote.test.ts`. The three-business test expects CAD 100.00 for hire after a pause, CAD 8.25 for usage above allowance and CAD 15.50 for a prorated contract.

@@ -792,7 +792,7 @@ test('arrears review stops at the next earned cycle and pins the exact late quot
     })),
   });
   assert.equal(next.status, 'due');
-  assert.equal(next.cycle.end, '2025-03-31T15:00:00.000Z');
+  assert.equal(next.cycle!.end, '2025-03-31T15:00:00.000Z');
   assert.equal(next.quote.lines[0]!.differenceCents, '49000');
 });
 
@@ -814,7 +814,7 @@ test('arrears end charges require an attested end and keep the original quote re
   const first = reviewArrearsCharges(p, e);
   assert.equal(first.status, 'due');
   assert.deepEqual(first.quote.lines, []);
-  const last = reviewArrearsCharges(p, { ...e, periodStart: first.cycle.end });
+  const last = reviewArrearsCharges(p, { ...e, periodStart: first.cycle!.end });
   assert.equal(last.status, 'due');
   assert.equal(last.quote.lines[0]!.differenceCents, '3100');
   assert.throws(
@@ -822,7 +822,7 @@ test('arrears end charges require an attested end and keep the original quote re
     /not delivered/,
   );
   assert.throws(
-    () => quoteBillingService(p, { ...e, coverageThrough: first.cycle.end }),
+    () => quoteBillingService(p, { ...e, coverageThrough: first.cycle!.end }),
     /coverage boundary/,
   );
   p.schedule = { kind: 'onServiceEnd' };
@@ -957,7 +957,7 @@ test('three businesses review net charge lines through the same closed-cycle cal
         l.servicePeriodEnd,
         l.differenceCents,
       ]),
-      [[start, review.cycle.end, expected]],
+      [[start, review.cycle!.end, expected]],
     );
     assert.deepEqual(replayBillingQuote(review.quote), review.quote);
   }

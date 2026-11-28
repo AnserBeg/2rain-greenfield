@@ -28,6 +28,8 @@ import {
   BILLING_QUOTE_CAPABILITY,
   BILLING_RULES_CALCULATION,
   BILLING_RULES_READER,
+  BILLING_TIMING_CALCULATION,
+  BILLING_TIMING_READER,
 } from '../../packages/canonical-model/src/billing.js';
 import { SERVICE_USE_PROTOCOL } from '../../packages/canonical-model/src/service-evidence.js';
 import {
@@ -199,7 +201,41 @@ type FixtureMode =
   | 'interval'
   | 'booking'
   | 'evidence'
+  | 'advance'
   | 'wrongSlot';
+// B2 (s3a-ii): a daily fee billed in advance over the service-use protocol,
+// ending at the actual return.
+const advancePlan = BillingPlanSchema.parse({
+  ...plan,
+  slots: [{ kind: 'money', id: 'daily', currency: 'CAD', scale: 2 }],
+  schedule: { kind: 'fixedDays', days: 1 },
+  components: [
+    {
+      id: 'rent',
+      kind: 'fixed',
+      base: 'enrollment',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      amount: 'daily',
+      timing: { when: 'advance' },
+      occurrence: {
+        kind: 'recurring',
+        cadence: { kind: 'fixedDays', days: 1 },
+        fixedFeeDuringPause: 'continue',
+      },
+    },
+  ],
+  bindings: {
+    ...plan.bindings!,
+    arrearsSource: {
+      kind: 'evidenceQuery',
+      queryId: usageQuery,
+      protocol: SERVICE_USE_PROTOCOL,
+      subjectId: trackedSlot,
+      earlyReturn: { bill: 'actualEnd' },
+    },
+  },
+});
 function billingFixture(
   mode: FixtureMode,
   base: BillingFixtureBase = currentBase,
@@ -221,7 +257,10 @@ function billingFixture(
     (c) => c.capabilityId === 'northstar.sales:capability.fulfillment',
   )!;
   const booking =
-    mode === 'booking' || mode === 'wrongSlot' || mode === 'evidence';
+    mode === 'booking' ||
+    mode === 'wrongSlot' ||
+    mode === 'evidence' ||
+    mode === 'advance';
   const usagePermission = id('permission.read_service_usage');
   const usage = {
     ...source,
@@ -348,38 +387,40 @@ function billingFixture(
     billingPlans: [
       mode === 'arrears'
         ? meterPlan
-        : mode === 'interval'
-          ? {
-              ...plan,
-              bindings: { ...b, arrearsSource: { kind: 'agreedInterval' } },
-            }
-          : mode === 'evidence'
+        : mode === 'advance'
+          ? advancePlan
+          : mode === 'interval'
             ? {
                 ...plan,
-                bindings: {
-                  ...b,
-                  arrearsSource: {
-                    kind: 'evidenceQuery',
-                    queryId: usageQuery,
-                    protocol: SERVICE_USE_PROTOCOL,
-                    subjectId: trackedSlot,
-                  },
-                },
+                bindings: { ...b, arrearsSource: { kind: 'agreedInterval' } },
               }
-            : booking
+            : mode === 'evidence'
               ? {
                   ...plan,
                   bindings: {
                     ...b,
                     arrearsSource: {
-                      kind: 'bookingActuals',
+                      kind: 'evidenceQuery',
                       queryId: usageQuery,
-                      slotId:
-                        mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                      protocol: SERVICE_USE_PROTOCOL,
+                      subjectId: trackedSlot,
                     },
                   },
                 }
-              : plan,
+              : booking
+                ? {
+                    ...plan,
+                    bindings: {
+                      ...b,
+                      arrearsSource: {
+                        kind: 'bookingActuals',
+                        queryId: usageQuery,
+                        slotId:
+                          mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                      },
+                    },
+                  }
+                : plan,
     ],
     fields: [
       ...p.fields,
@@ -717,6 +758,11 @@ test('each arrears source kind compiles at the arrears reader with the cycle cal
   assert.deepEqual(surface('evidence'), {
     reader: BILLING_RULES_READER,
     calculation: BILLING_RULES_CALCULATION,
+  });
+  // Per-component timing takes the timing reader and calculation v5.
+  assert.deepEqual(surface('advance'), {
+    reader: BILLING_TIMING_READER,
+    calculation: BILLING_TIMING_CALCULATION,
   });
   const pkg = parseNormalizedApplicationPackageJson(
     billingFixture('interval').bytes,
@@ -1877,14 +1923,18 @@ const serviceValues = (
   ship_to_postal_code: 'T2P 0A1',
   ship_to_country: 'Canada',
 });
-const termsFor = (ratePlan: unknown, anchor: string) => ({
+const termsFor = (
+  ratePlan: unknown,
+  anchor: string,
+  values: Record<string, string> = { daily: '30', weekly: '100' },
+) => ({
   schemaVersion: 'northstar.billing-rate-table/v1',
   version: 'first',
   currency: 'CAD',
   selector: { kind: 'base' },
   planDigest: compileRatePlan(ratePlan as typeof plan).digest,
   effectiveFrom: anchor,
-  values: { daily: '30', weekly: '100' },
+  values,
 });
 async function publishTerms(
   f: JourneyFixture,
@@ -2082,6 +2132,113 @@ test('an equipment hire reviews possession Booking stamped on its production clo
     0,
     0,
     release('booking'),
+  );
+});
+
+test('an advance fee bills its opened cycles on the agreed interval through the released quote query, and an early return keeps them', async () => {
+  // Agreed from 36 hours ago for five more days at CAD 30 a day in advance.
+  // The first cycle closed 12 hours ago; the second opened then.
+  const second = (offset: number) =>
+    new Date(Math.floor((Date.now() + offset) / 1000) * 1000).toISOString();
+  const anchor = second(-36 * 3_600_000);
+  const opened = new Date(Date.parse(anchor) + 86_400_000).toISOString();
+  const agreedEnd = second(5 * 86_400_000);
+  await withOrderEntryFixture(
+    async (f) => {
+      const values = serviceValues(
+        f,
+        anchor,
+        agreedEnd,
+        termsFor(advancePlan, anchor, { daily: '30' }),
+      );
+      const hire = await f.create('sales_order', values);
+      await publishTerms(f, hire);
+      const equipment = await f.create('sales_order', values);
+      const revision = async () =>
+        (
+          await f.app.runtime.entry.run(buyer, (v) =>
+            f.app.runtime.queryGateway.invoke(v, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: sourceId,
+              arguments: { recordId: hire.recordId, [scopeParameter]: f.scope },
+            }),
+          )
+        ).records[0]!.revision;
+      const book = async (
+        verb: string,
+        args: Record<string, ImmutableJsonValue>,
+      ) => {
+        const result = await f.invoke(`${verb}_service`, {
+          recordId: hire.recordId,
+          expectedRevision: await revision(),
+          arguments: args,
+        });
+        assert.equal(result.outcome, 'succeeded', verb);
+        return result.capabilityResult as {
+          bookingId: string;
+          revision: number;
+          state: string;
+        };
+      };
+      const until = new Date(Date.now() + 2 * 86_400_000)
+        .toISOString()
+        .slice(0, 16);
+      const held = await book('hold', {
+        resourceId: equipment.recordId,
+        quantity: '1',
+        interval: { kind: 'now', end: until },
+      });
+      const step = (b: { bookingId: string; revision: number }) => ({
+        bookingId: b.bookingId,
+        bookingRevision: b.revision,
+      });
+      const started = await book(
+        'start',
+        step(await book('confirm', step(held))),
+      );
+      assert.equal(started.state, 'inUse');
+      const cents = (review: {
+        quote: { lines: { differenceCents: string }[] };
+      }) => review.quote.lines.map((l) => l.differenceCents);
+      // Out now: both opened cycles are billed whole on the agreed interval.
+      const live = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(live.status, 'due', JSON.stringify(live));
+      assert.equal(live.quote.algorithm, BILLING_TIMING_CALCULATION);
+      assert.deepEqual(
+        live.advance.map((c: { start: string }) => c.start),
+        [anchor, opened],
+      );
+      assert.deepEqual(cents(live), ['3000', '3000']);
+      assert.equal(live.quote.inputs.evidence.agreedEnd, agreedEnd);
+      // Returned inside the second cycle (actualEnd): it stays whole and no
+      // third cycle opens.
+      const returned = await book('return', step(started));
+      assert.equal(returned.state, 'returned');
+      const stored = await f.pool.query<{ end: string }>(
+        `SELECT to_jsonb(effective_end)#>>'{}' AS end
+           FROM platform.booking_use_revisions WHERE booking_id=$1 ORDER BY revision DESC LIMIT 1`,
+        [held.bookingId],
+      );
+      const review = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(review.status, 'due', JSON.stringify(review));
+      const evidence = review.quote.inputs.evidence;
+      assert.equal(evidence.basis, 'actual');
+      assert.equal(
+        evidence.serviceEnd,
+        truncateBookingInstant(stored.rows[0]!.end),
+      );
+      assert.equal(evidence.agreedEnd, agreedEnd);
+      assert.deepEqual(review.cycle, { start: anchor, end: opened });
+      assert.deepEqual(cents(review), ['3000', '3000']);
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+    },
+    'demo',
+    0,
+    0,
+    release('advance'),
   );
 });
 
