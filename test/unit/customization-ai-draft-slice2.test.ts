@@ -5,6 +5,7 @@
  * type created in the same change set).
  */
 import assert from 'node:assert/strict';
+import { BillingPlanSchema } from '../../packages/canonical-model/src/billing.js';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
@@ -510,4 +511,45 @@ test('the drafting tool builds a rate plan version and keeps amounts and source 
         .status,
       'invalid',
     );
+  // Source attachment has its own authority: even a fully valid bindings
+  // object (one the plan schema itself admits) stays out of the member.
+  const bindings = {
+    quoteQueryId: 'northstar.app:query.quote',
+    evidenceQueryId: 'northstar.app:query.source',
+    agreedInterval: {
+      customerFieldId: 'northstar.app:field.customer',
+      currencyFieldId: 'northstar.app:field.currency',
+      startFieldId: 'northstar.app:field.start',
+      endFieldId: 'northstar.app:field.end',
+      zone: 'UTC',
+    },
+    publishOperationId: 'northstar.app:operation.publish',
+    overrideOperationId: 'northstar.app:operation.override',
+    assignmentOperationId: 'northstar.app:operation.assign',
+    termsQueryId: 'northstar.app:query.source',
+    termsFieldId: 'northstar.app:field.terms',
+  };
+  assert.equal(
+    BillingPlanSchema.safeParse({ ...ratePlan, bindings }).success,
+    true,
+  );
+  assert.equal(
+    parseCustomizationPatch({ ...input, ratePlan: { ...ratePlan, bindings } })
+      .status,
+    'invalid',
+  );
+});
+
+test('the drafter sees every variant of a discriminated union (oneOf), so rate rules are draftable', () => {
+  const description = describeDrafterKind('addRatePlanVersion');
+  for (const variant of [
+    '{rule: "ladder", capAtNextTier: true|false}',
+    '{rule: "prorate"}',
+    'perQuantity?: true',
+    '{rate: "hour"|"day"|"week"|"fourWeek"|"month", times: number 1-1000}',
+    'kind: "meter"',
+    '{kind: "onServiceEnd"}',
+  ])
+    assert.ok(description.includes(variant), variant);
+  assert.doesNotMatch(description, /components: \[value\]/u);
 });

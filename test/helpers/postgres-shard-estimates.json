@@ -13,6 +13,7 @@
     "test/postgres/booking-commitments.test.ts": 15,
     "test/postgres/booking-serving.test.ts": 201,
     "test/postgres/boot-capabilities.test.ts": 141,
+    "test/postgres/build-eval-rate-plans.test.ts": 250,
     "test/postgres/build-eval.test.ts": 724,
     "test/postgres/business-calendar-reader.test.ts": 55,
     "test/postgres/business-calendar.test.ts": 12,

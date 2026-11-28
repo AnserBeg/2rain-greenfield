@@ -26,14 +26,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
-import {
-  BILLING_ALLOCATION_READER,
-  BILLING_ARREARS_READER,
-  BILLING_CYCLE_CALCULATION,
-  BILLING_CALCULATION_VERSION,
-  BILLING_READER,
-  BILLING_INTERVAL_READER,
-} from '../../canonical-model/src/billing.js';
+import { billingReleaseMismatch } from '../../canonical-model/src/billing.js';
 import {
   popupDeclarationProblem,
   popupBindingsProblem,
@@ -789,16 +782,6 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
-  const hasAgreedBillingInterval =
-    Array.isArray(billingPlans) &&
-    billingPlans.some(
-      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
-    );
-  const hasArrears =
-    Array.isArray(billingPlans) &&
-    billingPlans.some(
-      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.arrearsSource,
-    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -1025,38 +1008,12 @@ function verifyCompiledRelease(
       );
       if (popupProblem)
         throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
-      const hasBillingCalculation = Object.hasOwn(
-        payload,
-        'billingCalculationVersion',
-      );
-      const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
-      const billingFloor = hasArrears
-        ? BILLING_ARREARS_READER
-        : hasBillingCalculation
-          ? BILLING_ALLOCATION_READER
-          : hasAgreedBillingInterval
-            ? BILLING_INTERVAL_READER
-            : BILLING_READER;
       if (
-        canonicalize(payload.billingPlans ?? null) !==
-          canonicalize(billingPlans ?? null) ||
-        (hasBillingCalculation &&
-          (!hasAgreedBillingInterval ||
-            payload.billingCalculationVersion !==
-              (hasArrears
-                ? BILLING_CYCLE_CALCULATION
-                : BILLING_CALCULATION_VERSION))) ||
-        (hasAgreedBillingInterval &&
-          surfaceFloor >= BILLING_ALLOCATION_READER &&
-          !hasBillingCalculation) ||
-        (billingPlans && surfaceFloor < billingFloor) ||
-        (!billingPlans &&
-          [
-            BILLING_READER,
-            BILLING_INTERVAL_READER,
-            BILLING_ALLOCATION_READER,
-            BILLING_ARREARS_READER,
-          ].includes(surfaceFloor))
+        billingReleaseMismatch(
+          billingPlans,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        )
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',

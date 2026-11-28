@@ -341,14 +341,6 @@
         "name:goods_receipt": 5
       }
     },
-    "packages/compiler/src/billing.ts": {
-      "owner": "GENERALIZE-1",
-      "cluster": "C12",
-      "expires": "2027-03-31",
-      "names": {
-        "engine:booking": 14
-      }
-    },
     "packages/compiler/src/compiler.ts": {
       "owner": "GENERALIZE-1",
       "cluster": "C8",
@@ -459,7 +451,7 @@
       "cluster": "C8",
       "expires": "2027-03-31",
       "names": {
-        "engine:billing": 18,
+        "engine:billing": 9,
         "engine:booking": 9,
         "name:stock_count": 4
       }
@@ -521,21 +513,11 @@
         "name:shipment": 1
       }
     },
-    "packages/postgres-provider/src/billing-booking-usage.ts": {
-      "owner": "GENERALIZE-1",
-      "cluster": "C12",
-      "expires": "2027-03-31",
-      "names": {
-        "engine:booking": 33,
-        "import:packages/domain/src/billing/fraction#decimal": 1
-      }
-    },
     "packages/postgres-provider/src/billing-quote.ts": {
-      "owner": "GENERALIZE-1",
+      "owner": "BILLING-1",
       "cluster": "C12",
       "expires": "2027-03-31",
       "names": {
-        "engine:booking": 16,
         "import:packages/domain/src/billing/arrears#dueArrearsCycle": 1,
         "import:packages/domain/src/billing/arrears#reviewArrearsCharges": 1,
         "import:packages/domain/src/billing/quote#quoteBillingService": 1,
@@ -1305,7 +1287,7 @@
       "cluster": "C8",
       "expires": "2027-03-31",
       "names": {
-        "engine:billing": 45,
+        "engine:billing": 11,
         "engine:booking": 16
       }
     },

@@ -5,7 +5,12 @@ import {
   BillingListAssignmentSchema,
   BILLING_INTERVAL_READER,
   BILLING_ARREARS_READER,
+  BILLING_RULES_READER,
+  billingEvidenceQuery,
+  hasBillingRules,
+  type BillingEvidenceQuery,
 } from '../../canonical-model/src/billing.js';
+import { serviceUseProvider } from '../../canonical-model/src/service-evidence.js';
 import {
   BillingQuoteEvidenceSchema,
   type BillingQuoteEvidence,
@@ -23,20 +28,30 @@ import {
   type SemanticQueryReadModelExecutor,
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
-import {
-  billingBookingUsage,
-  bookingPossessionServiceEnd,
-  fenceBillingBookingOwners,
-} from './billing-booking-usage.js';
+import { serviceUseFence } from './service-use-fence.js';
 import {
   dueArrearsCycle,
   reviewArrearsCharges,
 } from '../../domain/src/billing/arrears.js';
-import { BOOKING_USAGE_BINDING } from '../../canonical-model/src/booking.js';
 import {
   withTrustedRequestRead,
   withTrustedRequestTransaction,
 } from './request-context.js';
+
+/** B7: the agreed band's commercial quantity is the record's own quantity
+ * field (seats, desks, units) when the plan binds one, else 1. A missing or
+ * non-numeric value is undefined, and the caller refuses; the evidence schema
+ * then requires an exact nonnegative decimal. */
+export function agreedQuantity(
+  values: Readonly<Record<string, ImmutableJsonValue>>,
+  quantityFieldId: string | undefined,
+): string | undefined {
+  if (quantityFieldId === undefined) return '1';
+  const value = values[quantityFieldId];
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : undefined;
+}
 
 export function billingPlansIn(payload: unknown) {
   if (!payload || typeof payload !== 'object' || !('billingPlans' in payload))
@@ -55,9 +70,11 @@ export function billingQuoteReadModel(
     if (
       !p?.bindings ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        (p.bindings.arrearsSource
-          ? BILLING_ARREARS_READER
-          : BILLING_INTERVAL_READER) ||
+        (hasBillingRules(p)
+          ? BILLING_RULES_READER
+          : p.bindings.arrearsSource
+            ? BILLING_ARREARS_READER
+            : BILLING_INTERVAL_READER) ||
       definition.queryType !== 'get' ||
       result.records.length !== 1 ||
       !args ||
@@ -112,6 +129,7 @@ export function billingQuoteReadModel(
       currency = row.values[fields.currencyFieldId],
       anchor = row.values[fields.startFieldId],
       end = row.values[fields.endFieldId];
+    const quantity = agreedQuantity(row.values, fields.quantityFieldId);
     // Both reads attest the same revision, company and commercial identity.
     if (
       typeof customerId !== 'string' ||
@@ -120,7 +138,8 @@ export function billingQuoteReadModel(
       base.values[fields.customerFieldId] !== customerId ||
       base.values[fields.currencyFieldId] !== currency ||
       typeof anchor !== 'string' ||
-      (typeof end !== 'string' && !(b.arrearsSource && end === null))
+      (typeof end !== 'string' && !(b.arrearsSource && end === null)) ||
+      quantity === undefined
     )
       throw new Error(
         'Billing source identity, currency or interval disagrees',
@@ -182,7 +201,7 @@ export function billingQuoteReadModel(
       bands: [
         {
           id: row.recordId,
-          quantity: '1',
+          quantity,
           intervals: [{ id: row.recordId, revision, start: anchor, end }],
         },
       ],
@@ -253,14 +272,15 @@ async function readArrearsCycle(
   row: SemanticRecordDto,
   arrears: NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
 ) {
-  if (arrears.kind === 'bookingActuals')
-    return readBookingArrearsCycle(
+  const evidenceQuery = billingEvidenceQuery(arrears);
+  if (evidenceQuery)
+    return readServiceUseArrearsCycle(
       pool,
       { view, gateway },
       plan,
       evidence,
       row,
-      arrears,
+      evidenceQuery,
     );
   const cycle = dueArrearsCycle(plan, evidence);
   if (!cycle) return { status: 'notDue' as const };
@@ -297,7 +317,7 @@ async function readArrearsCycle(
   return reviewArrearsCharges(plan, evidence);
 }
 
-async function readBookingArrearsCycle(
+async function readServiceUseArrearsCycle(
   pool: Pool,
   {
     view,
@@ -306,82 +326,69 @@ async function readBookingArrearsCycle(
   plan: BillingPlan,
   evidence: BillingQuoteEvidence,
   row: SemanticRecordDto,
-  arrears: Extract<
-    NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
-    { kind: 'bookingActuals' }
-  >,
+  source: BillingEvidenceQuery,
 ) {
   if (Date.parse(evidence.asOf) <= Date.parse(evidence.anchor))
     return { status: 'notDue' as const };
-  const usage = registeredSemanticQueryFromPinnedView(view, arrears.queryId);
+  const found = registeredSemanticQueryFromPinnedView(view, source.queryId);
+  const usage = found?.queryType === 'get' ? found : undefined;
+  const provider = serviceUseProvider(usage?.readModel?.binding);
+  const field = provider && usage?.readModel?.resultFields[provider.resultKey];
+  const fence = provider && serviceUseFence(provider.binding);
   if (
-    usage?.queryType !== 'get' ||
-    usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
-    !usage.readModel.resultFields.usage ||
+    !usage ||
+    !provider ||
+    !field ||
+    !fence ||
     usage.sourceEntityId !== row.entityId ||
     usage.legalEntityScope?.cardinality !== 'exactlyOne'
   )
-    throw new Error('Billing requires scoped booking usage');
-  const readUsage = await gateway.invoke(view, {
+    throw new Error('Billing requires scoped service-use evidence');
+  const read = await gateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     queryId: usage.queryId,
     arguments: {
       recordId: row.recordId,
       [usage.legalEntityScope.operand.parameterId]: evidence.companyId,
-      // Possession is read through the review instant, so a hire kept past
-      // its agreed end keeps earning cycles (ADR-0083, calculation v3).
-      usage: { from: evidence.anchor, until: evidence.asOf },
+      // Use is read through the review instant, so a hire kept past its
+      // agreed end keeps earning cycles (ADR-0083, calculation v3).
+      ...provider.window(evidence.anchor, evidence.asOf),
     },
   });
-  const owner = readUsage.records[0];
+  const owner = read.records[0];
   if (
-    readUsage.outcome !== 'exact' ||
-    readUsage.records.length !== 1 ||
+    read.outcome !== 'exact' ||
+    read.records.length !== 1 ||
     owner?.recordId !== row.recordId ||
     owner.entityId !== row.entityId ||
     owner.archived ||
     owner.revision !== row.revision
   )
-    throw new Error('Incomplete or stale billing booking owner');
-  const snapshot = owner.values[usage.readModel.resultFields.usage];
-  evidence.serviceEnd = bookingPossessionServiceEnd(
+    throw new Error('Incomplete or stale service-use owner');
+  const snapshot = provider.decode(owner.values[field]);
+  const review = reviewArrearsCharges(plan, evidence, {
     snapshot,
-    arrears.slotId,
-    evidence.serviceEnd,
-  );
-  const cycle = dueArrearsCycle(plan, evidence);
-  if (!cycle) return { status: 'notDue' as const };
-  Object.assign(
-    evidence,
-    billingBookingUsage(
-      snapshot,
-      {
-        entityId: owner.entityId,
-        recordId: owner.recordId,
-        companyId: evidence.companyId,
-      },
-      arrears.slotId,
-      plan.serviceUnit,
-      cycle.end,
-    ),
-  );
+    subjectId: source.subjectId,
+    ...(source.earlyReturn && { earlyReturn: source.earlyReturn }),
+    owner: {
+      entityId: owner.entityId,
+      recordId: owner.recordId,
+      companyId: evidence.companyId,
+    },
+  });
+  if (review.status !== 'due') return review;
   await withTrustedRequestTransaction(
     pool,
     trustedContextForRequestRuntimeView(view),
     (client) =>
-      fenceBillingBookingOwners(
-        client,
-        view.release.releaseId,
-        view.pointer.fence,
-        [
-          {
-            queryId: usage.queryId,
-            entityId: owner.entityId,
-            recordId: owner.recordId,
-            cursor: evidence.cursor,
-          },
-        ],
-      ),
+      fence(client, view.release.releaseId, view.pointer.fence, [
+        {
+          queryId: usage.queryId,
+          entityId: owner.entityId,
+          recordId: owner.recordId,
+          cursor: evidence.cursor,
+        },
+      ]),
   );
-  return reviewArrearsCharges(plan, evidence);
+  return review;
 }

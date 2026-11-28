@@ -4,13 +4,7 @@ import {
   REPORT_ANALYSIS_READER,
   REPORT_MEASURE_READER,
 } from '../../canonical-model/src/declared-report-v2.js';
-import {
-  BILLING_READER,
-  BILLING_ALLOCATION_READER,
-  BILLING_ARREARS_READER,
-  BILLING_CYCLE_CALCULATION,
-  BILLING_CALCULATION_VERSION,
-} from '../../canonical-model/src/billing.js';
+import { billingReleaseTerms } from '../../canonical-model/src/billing.js';
 import {
   POPUP_READER,
   compiledPopups,
@@ -677,27 +671,18 @@ export function lowerBaseProjectionPayloads(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!;
     const billingPlans = verificationPackageRevision.billingPlans;
-    const hasAgreedInterval = billingPlans.some(
-      (p) => p.bindings?.agreedInterval,
-    );
-    const hasArrears = billingPlans.some((p) => p.bindings?.arrearsSource);
+    const terms = billingReleaseTerms(billingPlans);
     surface.payload = {
       ...(surface.payload as object),
       billingPlans,
-      ...(hasAgreedInterval && {
-        billingCalculationVersion: hasArrears
-          ? BILLING_CYCLE_CALCULATION
-          : BILLING_CALCULATION_VERSION,
+      ...(terms.calculation && {
+        billingCalculationVersion: terms.calculation,
       }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        hasArrears
-          ? BILLING_ARREARS_READER
-          : hasAgreedInterval
-            ? BILLING_ALLOCATION_READER
-            : BILLING_READER,
+        terms.floor,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };

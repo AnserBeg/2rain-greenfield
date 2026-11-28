@@ -12,6 +12,7 @@
  * matches a generated id when their slugs are equal or one contains the other.
  */
 // Kept free of the database world so unit tests can read the cases.
+import type { RatePlanPrices } from './rate-plan-pricing.js';
 const NS = 'northstar.app';
 
 export type FieldType =
@@ -92,7 +93,12 @@ export interface WorkflowCallSpec {
 }
 
 export type Expectation =
-  | { readonly outcome: 'ratePlan'; readonly kind: 'time' | 'meter' | 'fixed' }
+  | {
+      readonly outcome: 'ratePlan';
+      readonly kind: 'time' | 'meter' | 'fixed';
+      /** BILLING-1 s3a-i: scored by what the plan charges (rate-plan-pricing). */
+      readonly prices?: RatePlanPrices;
+    }
   | {
       readonly outcome: 'module';
       readonly types: readonly TypeSpec[];
@@ -390,6 +396,59 @@ export const BUILD_CASES: readonly BuildCase[] = [
     request:
       'Declare an untaxed CAD service contract rate plan with just one fixed retainer, earned each monthly anniversary, prorated for active coverage. No meter or time offers. The fee will be published separately.',
     expect: { outcome: 'ratePlan', kind: 'fixed' },
+  },
+  // BILLING-1 s3a-i (B1, B7): the owner's two rental businesses and a
+  // per-seat subscription, scored by the amounts the drafted plan charges.
+  {
+    id: 'B04',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Declare an untaxed CAD equipment hire rate plan structure with a daily and a weekly rate, invoiced when the hire ends. Once a hire runs a full week we prorate the weekly rate by the day, so ten days costs ten sevenths of a week; shorter hires pay the daily rate. Amounts are published later.',
+    expect: {
+      outcome: 'ratePlan',
+      kind: 'time',
+      prices: {
+        values: { day: '20', week: '100' },
+        quotes: [
+          { days: 3, cents: '6000' },
+          { days: 10, cents: '14286' },
+        ],
+      },
+    },
+  },
+  {
+    id: 'B05',
+    split: 'test',
+    category: 'module',
+    request:
+      'Declare an untaxed CAD equipment hire rate plan structure with a daily and a weekly rate, invoiced when the hire ends. We charge whole weeks first and then each extra day at the daily rate, with no cap: ten days is one week plus three days, thirteen days is one week plus six days. Amounts are published later.',
+    expect: {
+      outcome: 'ratePlan',
+      kind: 'time',
+      prices: {
+        values: { day: '20', week: '100' },
+        quotes: [
+          { days: 10, cents: '16000' },
+          { days: 13, cents: '22000' },
+        ],
+      },
+    },
+  },
+  {
+    id: 'B06',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Declare an untaxed CAD software subscription rate plan structure: one fixed fee per seat, earned each monthly anniversary, prorated for active coverage. A customer with five seats pays five times the fee. No time or usage charges; the fee is published later.',
+    expect: {
+      outcome: 'ratePlan',
+      kind: 'fixed',
+      prices: {
+        values: { amount: '15' },
+        quotes: [{ days: 31, quantity: '5', cents: '7500' }],
+      },
+    },
   },
 
   // ---- development set ----
@@ -1964,7 +2023,7 @@ export function scoredKinds(c: BuildCase): readonly string[] {
   if (e.outcome === 'report')
     return [e.measure ? 'addMeasureRevision' : 'addReportRevision'];
   if (e.outcome === 'validation') return ['addValidation'];
-  // B01-B03 score one activated rate-plan structure (build-eval: kinds[0]).
+  // B01-B06 score one activated rate-plan structure (build-eval: kinds[0]).
   if (e.outcome === 'ratePlan') return ['addRatePlanVersion'];
   if (e.outcome === 'presentation') return ['addPresentationRevision'];
   if (e.outcome !== 'module') return [];

@@ -11,7 +11,6 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
-import { LINE_LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -258,7 +257,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // assigned at its main-compat merge).
     // 53 reads logical fields on line tables and an amount whose currency
     // is read from the line header (CUSTOMIZE-6 s2; assigned at TRAIN-S).
-    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
+    // 54 reads billing rate rules and the service-use evidence source
+    // (BILLING_RULES_READER, BILLING-1 s3a-i; assigned at TRAIN-X). A
+    // literal, because the name law keeps engine names out of this
+    // generic file; request-runtime-view.test.ts pins it to the constant.
+    maximumSupportedVersion: 54,
   },
 });
 

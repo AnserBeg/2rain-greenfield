@@ -25,6 +25,8 @@ import {
   EVAL_CASE_EXCEPTIONS,
   scoredKinds,
 } from '../agent/build-eval-cases.js';
+import { ratePlanCharges } from '../agent/rate-plan-pricing.js';
+import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 
 // ------------------------------------------------------------ (a) eval cases
 
@@ -59,7 +61,7 @@ test('(a) scored kinds are read from the expectation, one case per shape', () =>
   assert.deepEqual(kinds('F01'), ['addField']);
   assert.deepEqual(kinds('W01'), ['saveWorkflow']);
   assert.deepEqual(kinds('F06'), ['addBoardViewRevision']);
-  for (const id of ['B01', 'B02', 'B03'])
+  for (const id of ['B01', 'B02', 'B03', 'B04', 'B05', 'B06'])
     assert.deepEqual(kinds(id), ['addRatePlanVersion'], id);
   assert.deepEqual(kinds('U02'), [], 'an unsupported case scores no kind');
 });
@@ -219,4 +221,84 @@ test('(d) every repairable refusal carries its code, message and the rule it bro
 test('(d) a final refusal is not given rules to argue with', () => {
   const result = classifyDraftOutcome(refused('CUSTOMIZE_DRAFT_STALE'));
   assert.equal(result.status, 'final');
+});
+
+// BILLING-1 s3a-i (rule 12): the priced rate-plan cases score what a drafted
+// plan charges. These are the drafts a fake model would return: the right
+// rule passes, the engine's default or a missing per-seat flag fails by cents.
+test('(a) priced rate-plan cases score the amounts the drafted plan charges', () => {
+  const prices = (id: string) => {
+    const expect = BUILD_CASES.find((c) => c.id === id)!.expect;
+    assert.ok(expect.outcome === 'ratePlan' && expect.prices, id);
+    return expect.prices;
+  };
+  const hire = (combination?: object) =>
+    compileRatePlan({
+      schemaVersion: 'v6',
+      id: 'hire',
+      version: '1',
+      currency: 'CAD',
+      serviceUnit: 'each',
+      schedule: { kind: 'onServiceEnd' },
+      slots: ['daily', 'weekly'].map((id) => ({
+        id,
+        kind: 'money',
+        currency: 'CAD',
+        scale: 2,
+      })),
+      components: [
+        {
+          kind: 'time',
+          id: 'time',
+          base: 'serviceInterval',
+          stage: 'beforeMinimum',
+          taxClassification: 'untaxed',
+          rates: { day: 'daily', week: 'weekly' },
+          ...(combination ? { combination } : {}),
+        },
+      ],
+    }).plan;
+  const seats = (perQuantity: boolean) =>
+    compileRatePlan({
+      schemaVersion: 'v6',
+      id: 'seats',
+      version: '1',
+      currency: 'CAD',
+      serviceUnit: 'seat',
+      schedule: { kind: 'anniversary', months: 1 },
+      slots: [{ id: 'fee', kind: 'money', currency: 'CAD', scale: 2 }],
+      components: [
+        {
+          kind: 'fixed',
+          id: 'fee',
+          base: 'enrollment',
+          stage: 'afterCapBeforeTax',
+          taxClassification: 'untaxed',
+          amount: 'fee',
+          ...(perQuantity ? { perQuantity: true } : {}),
+          occurrence: {
+            kind: 'recurring',
+            cadence: { kind: 'anniversary', months: 1 },
+            feeProration: 'activeCoverage',
+          },
+        },
+      ],
+    }).plan;
+  assert.deepEqual(ratePlanCharges(hire({ rule: 'prorate' }), prices('B04')), [
+    '6000',
+    '14286',
+  ]);
+  assert.deepEqual(ratePlanCharges(hire(), prices('B04')), ['6000', '16000']);
+  assert.deepEqual(
+    ratePlanCharges(
+      hire({ rule: 'ladder', capAtNextTier: false }),
+      prices('B05'),
+    ),
+    ['16000', '22000'],
+  );
+  assert.deepEqual(ratePlanCharges(hire(), prices('B05')), ['16000', '20000']);
+  assert.deepEqual(ratePlanCharges(seats(true), prices('B06')), ['7500']);
+  assert.deepEqual(ratePlanCharges(seats(false), prices('B06')), ['1500']);
+  // A rate the request never named cannot be priced.
+  assert.match(String(ratePlanCharges(hire(), prices('B06'))), /unrequested/u);
 });

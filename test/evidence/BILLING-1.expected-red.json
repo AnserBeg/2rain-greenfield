@@ -40,10 +40,10 @@
     },
     {
       "name": "billing-booking-microseconds",
-      "claim": "Billing accepts the microsecond instants Booking writes and truncates them to the millisecond.",
-      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
-      "original": "  .transform(truncateBookingInstant);",
-      "replacement": "  .refine((s) => !/\\.\\d{3}\\d*[1-9]/u.test(s), 'Booking time exceeds the Billing precision')\n  .transform(truncateBookingInstant);",
+      "claim": "Booking hands Billing its microsecond instants through the service-use protocol truncated to the millisecond.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "  return truncateBookingInstant(bookingInstant.parse(value));",
+      "replacement": "  const text = bookingInstant.parse(value);\n  if (/\\.\\d{3}\\d*[1-9]/u.test(text))\n    throw new Error('Booking time exceeds the Billing precision');\n  return truncateBookingInstant(text);",
       "test": {
         "files": ["test/integration/billing-booking-possession.test.ts"],
         "namePattern": "^Booking microsecond instants truncate toward the past to the Billing millisecond$"
@@ -59,9 +59,9 @@
     {
       "name": "billing-booking-live-leg",
       "claim": "A live use leg keeps the hire open past its agreed end.",
-      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
-      "original": "    if (leg.effectiveEnd === null) return null;",
-      "replacement": "    if (leg.effectiveEnd === null) return agreedEnd;",
+      "file": "packages/domain/src/billing/service-use.ts",
+      "original": "    if (leg.end === null) return null;",
+      "replacement": "    if (leg.end === null) return agreedEnd;",
       "test": {
         "files": ["test/integration/billing-booking-possession.test.ts"],
         "namePattern": "^a live use leg past the agreed end keeps earning completed cycles$"
@@ -77,7 +77,7 @@
     {
       "name": "billing-booking-overrun",
       "claim": "A hire returned after its agreed end bills through the recorded return.",
-      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
+      "file": "packages/domain/src/billing/service-use.ts",
       "original": "agreedEnd === null ? returned : Math.max(returned, Date.parse(agreedEnd)),",
       "replacement": "agreedEnd === null ? returned : Date.parse(agreedEnd),",
       "test": {
@@ -148,10 +148,10 @@
     },
     {
       "name": "billing-booking-possession-wired",
-      "claim": "The released quote query sets the hire service end from Booking possession.",
-      "file": "packages/postgres-provider/src/billing-quote.ts",
-      "original": "  evidence.serviceEnd = bookingPossessionServiceEnd(",
-      "replacement": "  void bookingPossessionServiceEnd(",
+      "claim": "The released quote query sets the hire service end from actual use (Booking through the service-use protocol).",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "    evidence.serviceEnd = serviceUseEnd(",
+      "replacement": "    void serviceUseEnd(",
       "test": {
         "files": ["test/postgres/billing-terms.test.ts"],
         "namePattern": "^an equipment hire reviews possession Booking stamped on its production clock through the released quote query$"
@@ -161,6 +161,816 @@
           "file": "test/postgres/billing-terms.test.ts",
           "name": "an equipment hire reviews possession Booking stamped on its production clock through the released quote query",
           "expected": "a live hire past its end is open"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-prorate",
+      "claim": "The prorate combination charges the reached rate pro rata (10 days at 100 a week is 142.86).",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "      return prorateCover(segments, monthDays, component, values, budget);",
+      "replacement": "      return bestCover(segments, monthDays, component, values, budget);",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "prorate \\(the tier reached\\)"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-ladder",
+      "claim": "The ladder combination fills whole blocks from the longest rate down (13 days is 220 uncapped).",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "      return ladderCover(segments, monthDays, component, values, budget);",
+      "replacement": "      return bestCover(segments, monthDays, component, values, budget);",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "ladder without a cap"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-ladder-cap",
+      "claim": "A ladder capped at the next tier never charges more than one more block of the rate above.",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "    if (capped && rest.price.compare(offer.rate) > 0) {",
+      "replacement": "    if (capped && false) {",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "ladder capped at the next tier"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-best-price",
+      "claim": "bestPrice, the default, keeps the least exact price of any cover.",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "      return bestCover(segments, monthDays, component, values, budget);",
+      "replacement": "      return ladderCover(segments, monthDays, component, values, budget);",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "bestPrice, declared"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-partial",
+      "claim": "A per-rate partial rule decides whether a final partial block of that rate is whole or pro rata.",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "  if (declared) return declared === 'prorate';",
+      "replacement": "  if (declared) return false;",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: a per\\-rate partial rule prorates a final partial block of that rate$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: a per-rate partial rule prorates a final partial block of that rate",
+          "expected": "18000 !== 17000"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-cap-multiple",
+      "claim": "A cap can be a whole multiple of an offered rate.",
+      "file": "packages/domain/src/billing/cover.ts",
+      "original": "  return decimal(values[component.rates[cap.rate]!]!).times(integer(cap.times));",
+      "replacement": "  return decimal(values[component.rates[cap.rate]!]!);",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: a cap can be a whole multiple of an offered rate$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: a cap can be a whole multiple of an offered rate",
+          "expected": "\\+\\s+10000"
+        }
+      ]
+    },
+    {
+      "name": "billing-per-quantity",
+      "claim": "A per-quantity fee multiplies by the service's commercial quantity (5 seats x fee).",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "      const quantity = c.perQuantity ? coverage.bands[0]!.quantity : one;",
+      "replacement": "      const quantity = one;",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B7: a per\\-quantity fee charges 5 seats x the monthly fee$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B7: a per-quantity fee charges 5 seats x the monthly fee",
+          "expected": "\\+\\s+'1500'"
+        }
+      ]
+    },
+    {
+      "name": "billing-early-return-actual-end",
+      "claim": "Under actualEnd an early return ends the service at the return, not the agreed end.",
+      "file": "packages/domain/src/billing/service-use.ts",
+      "original": "    if (earlyReturn.bill === 'agreedEnd' && agreedEnd !== null)",
+      "replacement": "    if (agreedEnd !== null)",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B9: early return bills to the agreed end or the actual end, and absent keeps v3$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B9: early return bills to the agreed end or the actual end, and absent keeps v3",
+          "expected": "\\+\\s+cents: '15000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-early-return-committed",
+      "claim": "Under agreedEnd the time from the return to the agreed end is billed once it has elapsed.",
+      "file": "packages/domain/src/billing/service-use.ts",
+      "original": "    Date.parse(serviceEnd) > lastReturn",
+      "replacement": "    Date.parse(serviceEnd) < lastReturn",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B9: early return bills to the agreed end or the actual end, and absent keeps v3$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B9: early return bills to the agreed end or the actual end, and absent keeps v3",
+          "expected": "\\+\\s+cents: '9000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-minimum-term",
+      "claim": "A minimum term in periods holds the service open until it elapses.",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "      term && minimumTermEnd(evidence, term),",
+      "replacement": "      undefined,",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B9: a minimum term in periods holds the service open until it elapses$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B9: a minimum term in periods holds the service open until it elapses",
+          "expected": "-\\s+cents: '21000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-replay-rule",
+      "claim": "The reader-45 provider-named declaration reads as the service-use protocol with its slot as subject.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "  if (source.kind === 'evidenceQuery') return source;",
+      "replacement": "  if (source.kind === 'evidenceQuery') return source;\n  if (source.kind !== 'evidenceQuery') return undefined;",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^the evidence source declares the service\\-use protocol and the persisted reader\\-45 form replays as it$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "the evidence source declares the service-use protocol and the persisted reader-45 form replays as it",
+          "expected": "\\+ undefined"
+        }
+      ]
+    },
+    {
+      "name": "billing-evidence-protocol",
+      "claim": "An evidence query must implement the declared service-use protocol (a registered provider for its binding).",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      const provider = serviceUseProvider(model?.binding);",
+      "replacement": "      const provider = serviceUseProvider(model?.binding) ?? serviceUseProvider('northstar.booking:protocol.owner_usage_v1');",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^any read model implementing the service\\-use protocol is an evidence source, and its provider checks the subject$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "any read model implementing the service-use protocol is an evidence source, and its provider checks the subject",
+          "expected": "evidence: the query implements the service-use protocol"
+        }
+      ]
+    },
+    {
+      "name": "billing-quantity-field",
+      "claim": "A bound record quantity is a required exact number on the billed record.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      quantityProblem(interval.quantityFieldId) ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^a bound record quantity is a required exact number on the billed record$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "a bound record quantity is a required exact number on the billed record",
+          "expected": "an optional quantity cannot bind"
+        }
+      ]
+    },
+    {
+      "name": "billing-usage-company-scope",
+      "claim": "The usage query is scoped to exactly one company.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "        usage.legalEntityScope?.cardinality !== 'exactlyOne' ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^any read model implementing the service\\-use protocol is an evidence source, and its provider checks the subject$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "any read model implementing the service-use protocol is an evidence source, and its provider checks the subject",
+          "expected": "evidence: the usage query is scoped to one company"
+        }
+      ]
+    },
+    {
+      "name": "billing-usage-owner-query",
+      "claim": "The usage query reads the billing owner (source) query.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "        model.queries.owner?.targetId !== source?.queryId ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^any read model implementing the service\\-use protocol is an evidence source, and its provider checks the subject$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "any read model implementing the service-use protocol is an evidence source, and its provider checks the subject",
+          "expected": "evidence: the usage query reads the billing owner query"
+        }
+      ]
+    },
+    {
+      "name": "billing-slot-owner",
+      "claim": "The Booking subject is a slot whose owner is the billed record type.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "        op.booking.ownerEntity === query.sourceEntity.targetId &&",
+      "replacement": "        true &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^any read model implementing the service\\-use protocol is an evidence source, and its provider checks the subject$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "any read model implementing the service-use protocol is an evidence source, and its provider checks the subject",
+          "expected": "evidence: the slot owner is the billing entity"
+        }
+      ]
+    },
+    {
+      "name": "billing-slot-tracked",
+      "claim": "The Booking subject is a tracked slot.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "        op.booking.fulfilmentMode === 'tracked' &&",
+      "replacement": "        true &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^any read model implementing the service\\-use protocol is an evidence source, and its provider checks the subject$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "any read model implementing the service-use protocol is an evidence source, and its provider checks the subject",
+          "expected": "evidence: the slot is tracked"
+        }
+      ]
+    },
+    {
+      "name": "billing-meter-no-time",
+      "claim": "A meter source has no time component.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "            c.kind === 'time' ||",
+      "replacement": "            false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^period meter bindings require distinct selected boundaries, canonical units and a single stream$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "period meter bindings require distinct selected boundaries, canonical units and a single stream",
+          "expected": "a meter source has no time component"
+        }
+      ]
+    },
+    {
+      "name": "billing-meter-per-cycle",
+      "claim": "A meter source uses a per-cycle allowance.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "              (c.allowanceBasis.kind !== 'perCycle' ||",
+      "replacement": "              (false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^period meter bindings require distinct selected boundaries, canonical units and a single stream$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "period meter bindings require distinct selected boundaries, canonical units and a single stream",
+          "expected": "a meter source uses a per-cycle allowance"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-basis",
+      "claim": "Boundary readings require a usage-only basis.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "      e.basis !== 'usageOnly' ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "Missing expected exception: basis"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-usage-events",
+      "claim": "Boundary readings refuse usage events beside them.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "      e.usage.length ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "Missing expected exception: usage events"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-pauses",
+      "claim": "Boundary readings refuse pauses.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "      e.pauses.length ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "Missing expected exception: pauses"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-opening",
+      "claim": "The opening reading is at the period start.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "      e.periodMeter.opening.at !== e.periodStart ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "opening instant"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-stream",
+      "claim": "The readings belong to the meter component's stream.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "          (c.streamId !== e.periodMeter!.streamId ||",
+      "replacement": "          (false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "Missing expected exception: stream"
+        }
+      ]
+    },
+    {
+      "name": "billing-readings-per-cycle",
+      "claim": "Boundary readings rate only a per-cycle allowance.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "            c.allowanceBasis.kind !== 'perCycle'),",
+      "replacement": "            false),",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^boundary readings refuse every shape that is not one unpaused meter cycle$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "boundary readings refuse every shape that is not one unpaused meter cycle",
+          "expected": "Missing expected exception: per-cycle allowance"
+        }
+      ]
+    },
+    {
+      "name": "billing-invalid-service-period",
+      "claim": "An arrears review refuses a period before the anchor or an end at it.",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "  if (start < anchor || (end !== null && end <= anchor))",
+      "replacement": "  if (false)",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^an arrears review refuses an invalid service period$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "an arrears review refuses an invalid service period",
+          "expected": "a period before the anchor"
+        }
+      ]
+    },
+    {
+      "name": "billing-engagement-own-facts",
+      "claim": "A Booking engagement carries only its own booking's facts.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "      (r) => r.bookingId === bookingId && !r.voided && r.kind === kind,",
+      "replacement": "      (r) => !r.voided && r.kind === kind,",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^a service\\-use engagement carries only its own facts in its own unit$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "a service-use engagement carries only its own facts in its own unit",
+          "expected": "\\+\\s+'theirs'"
+        }
+      ]
+    },
+    {
+      "name": "billing-leg-unit",
+      "claim": "Billing refuses a use leg measured in another unit.",
+      "file": "packages/domain/src/billing/service-use.ts",
+      "original": "        r.unit !== unit ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^a service\\-use engagement carries only its own facts in its own unit$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "a service-use engagement carries only its own facts in its own unit",
+          "expected": "Missing expected exception\\."
+        }
+      ]
+    },
+    {
+      "name": "billing-loader-arrears-floor",
+      "claim": "The release loader refuses an arrears plan below the arrears reader.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "        ? BILLING_ARREARS_READER",
+      "replacement": "        ? BILLING_ALLOCATION_READER",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^the release loader refuses a plan below its billing reader \\(BILLING_PLAN_MISMATCH\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "the release loader refuses a plan below its billing reader (BILLING_PLAN_MISMATCH)",
+          "expected": "the arrears floor"
+        }
+      ]
+    },
+    {
+      "name": "billing-quote-permission-role",
+      "claim": "The quote grant is a read of the billed record type, bound by role, not name.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      declared(permissionId)?.action === 'read' &&",
+      "replacement": "      true &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "the quote grant is a read"
+        }
+      ]
+    },
+    {
+      "name": "billing-terms-permission-role",
+      "claim": "The terms grant is a write, never a read.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      ['create', 'update', 'transition'].includes(",
+      "replacement": "      ['create', 'update', 'transition', 'read'].includes(",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "the terms grant is a write"
+        }
+      ]
+    },
+    {
+      "name": "billing-member-bindings",
+      "claim": "The rate-plan member refuses source bindings, even a fully valid object.",
+      "file": "packages/customization/src/patch.ts",
+      "original": "  .omit({ bindings: true });",
+      "replacement": "  .omit({});",
+      "test": {
+        "files": ["test/unit/customization-ai-draft-slice2.test.ts"],
+        "namePattern": "^the drafting tool builds a rate plan version and keeps amounts and source authority out of the patch$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-ai-draft-slice2.test.ts",
+          "name": "the drafting tool builds a rate plan version and keeps amounts and source authority out of the patch",
+          "expected": "\\+ 'parsed'"
+        }
+      ]
+    },
+    {
+      "name": "billing-drafter-one-of",
+      "claim": "The drafter description renders oneOf variants.",
+      "file": "packages/customization/src/ai-draft-kinds.ts",
+      "original": "  for (const variants of [node.anyOf, node.oneOf])",
+      "replacement": "  for (const variants of [node.anyOf])",
+      "test": {
+        "files": ["test/unit/customization-ai-draft-slice2.test.ts"],
+        "namePattern": "^the drafter sees every variant of a discriminated union \\(oneOf\\), so rate rules are draftable$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-ai-draft-slice2.test.ts",
+          "name": "the drafter sees every variant of a discriminated union (oneOf), so rate rules are draftable",
+          "expected": "\\{rule: \"ladder\", capAtNextTier: true\\|false\\}"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-version-selection",
+      "claim": "A plan with a rule key is quoted under calculation v4, and calculate refuses it under any other version.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "    hasBillingRules(planInput)",
+      "replacement": "    false",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "Billing rate rules require calculation v4"
+        }
+      ]
+    },
+    {
+      "name": "billing-snapshot-schema",
+      "claim": "Billing holds every provider's snapshot to the service-use protocol shape where it consumes it.",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "    snapshot: ServiceUseSnapshotSchema.parse(input.snapshot),",
+      "replacement": "    snapshot: input.snapshot,",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^the service\\-use protocol shape is enforced where Billing consumes it$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "the service-use protocol shape is enforced where Billing consumes it",
+          "expected": "Missing expected exception: an undeclared key"
+        }
+      ]
+    },
+    {
+      "name": "billing-agreed-quantity",
+      "claim": "The agreed band reads the bound record quantity field (B7), not a fixed 1.",
+      "file": "packages/postgres-provider/src/billing-quote.ts",
+      "original": "  if (quantityFieldId === undefined) return '1';",
+      "replacement": "  return '1';",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B7: the agreed band reads the record quantity field, 1 when none is bound$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B7: the agreed band reads the record quantity field, 1 when none is bound",
+          "expected": "'1' !== '5'"
+        }
+      ]
+    },
+    {
+      "name": "billing-quote-grant-dedicated",
+      "claim": "No active query but a bound plan's quote reads under the quote grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          !boundQuotes.has(q.queryId) &&",
+      "replacement": "          false &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "no other query reads under the quote grant"
+        }
+      ]
+    },
+    {
+      "name": "billing-terms-grant-dedicated",
+      "claim": "No operation but a bound plan's terms writes holds the terms grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          !boundWrites.has(o.operationId) &&",
+      "replacement": "          false &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "no operation outside the terms writes holds the terms grant"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-ladder-partial",
+      "claim": "Under ladder a partial rule may name only the shortest offered rate, the one a ladder charges partly.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "          c.combination?.rule === 'ladder' &&",
+      "replacement": "          false &&",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: partial rules name offered rates and replace the legacy shortest\\-tail switch$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: partial rules name offered rates and replace the legacy shortest-tail switch",
+          "expected": "a longer rate under ladder"
+        }
+      ]
+    },
+    {
+      "name": "billing-quantity-field-source",
+      "claim": "A record quantity binds only beside an agreed-interval source (or none), where the agreed band reads it.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      interval?.quantityFieldId !== undefined &&",
+      "replacement": "      false &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^a bound record quantity is a required exact number on the billed record$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "a bound record quantity is a required exact number on the billed record",
+          "expected": "an evidence source rates its legs, not a record quantity"
+        }
+      ]
+    },
+    {
+      "name": "billing-meter-per-quantity",
+      "claim": "A period meter plan has no per-quantity fee: readings carry no commercial quantity.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      if (p.components.some((c) => c.kind === 'fixed' && c.perQuantity))",
+      "replacement": "      if (false)",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^period meter bindings require distinct selected boundaries, canonical units and a single stream$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "period meter bindings require distinct selected boundaries, canonical units and a single stream",
+          "expected": "a meter source has no per-quantity fee"
+        }
+      ]
+    },
+    {
+      "name": "billing-early-return-last-return",
+      "claim": "Committed early-return time runs from the last return to the service end, never the agreed interval in full (120 under agreedEnd, 180 under a one-week minimum, for a day-one pickup).",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n    );",
+      "replacement": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B9: committed time runs from the last return, not from pickup$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B9: committed time runs from the last return, not from pickup",
+          "expected": "\\+\\s+cents: '15000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-early-return-rules-only",
+      "claim": "Early return is rated under calculation v4 only: a plan that does not declare it is refused one.",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "  if (use?.earlyReturn && !hasBillingRules(plan))",
+      "replacement": "  if (false)",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B9: early return is rated under calculation v4 only$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B9: early return is rated under calculation v4 only",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "billing-quote-grant-plans",
+      "claim": "Every bound plan's quote is inside the quote grant, so two plans share one grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          !boundQuotes.has(q.queryId) &&",
+      "replacement": "          q.queryId !== b.quoteQueryId &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "two bound plans share the quote and terms grants"
+        }
+      ]
+    },
+    {
+      "name": "billing-terms-grant-plans",
+      "claim": "Every bound plan's terms writes are inside the terms grant, so two plans share one grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          !boundWrites.has(o.operationId) &&",
+      "replacement": "          !writes.includes(o.operationId) &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "two bound plans share the quote and terms grants"
         }
       ]
     }
