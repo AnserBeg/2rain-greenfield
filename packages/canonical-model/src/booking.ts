@@ -402,8 +402,7 @@ export function bookingServiceUse(value: unknown): ServiceUseSnapshot {
     id: r.id,
     revision: String(r.revision),
     start: effectiveInstant(r.effectiveStart),
-    end:
-      r.effectiveEnd === null ? null : effectiveInstant(r.effectiveEnd),
+    end: r.effectiveEnd === null ? null : effectiveInstant(r.effectiveEnd),
   });
   return {
     schemaVersion: SERVICE_USE_SNAPSHOT_VERSION,
