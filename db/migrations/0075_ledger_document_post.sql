@@ -114,9 +114,11 @@ DECLARE catalog jsonb; storage jsonb; BEGIN
     RAISE EXCEPTION 'ledger.bindingUnavailable'; END IF; END $$;
 
 -- The preparation read: the stored company of a live draft of the trusted
--- tenant, for the gateway's policy scope. Missing, archived and another
--- tenant's draft are one answer (null), which the executor refuses as
--- ledger.unavailable. The apply re-derives the company under the lock.
+-- tenant, for the gateway's policy scope. Missing, archived, another tenant's
+-- draft and a draft of a company where the caller holds no journal_post are
+-- one answer (null), which the executor refuses as ledger.unavailable, so the
+-- read is no existence oracle. The apply re-derives the company and checks
+-- authority again under the lock.
 CREATE FUNCTION platform.ledger_document_company(released uuid, operation text, draft uuid) RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE b record; company uuid; BEGIN
@@ -126,6 +128,9 @@ DECLARE b record; company uuid; BEGIN
       ' AND %I = $3 AND %I IS NULL',
       b.header->>'physicalTableName', b.header#>>'{recordIdentity,column}', b.header#>>'{archive,archivedAtColumn}')
     INTO company USING north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), draft;
+  -- A draft in a company the caller may not post in answers as a missing one.
+  IF company IS NULL OR NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post',
+      'northstar.ledger:capability.journal') THEN RETURN NULL; END IF;
   RETURN company;
 EXCEPTION WHEN raise_exception THEN RETURN NULL; END $$;
 

@@ -6,6 +6,8 @@ authority, RLS-adjacent SQL, a migration and a reader rung) under charter rule 2
 AMENDMENTS, `/home/rvham/2rain-missions/DOCUMENT-POSTING-design-read.result.txt`), whose binding amendments 1-12 and
 thin first slice are the scope. The opening entry is slice 2 (`ledger.openingNotYet` until then).
 
+CI tier: pending full
+
 ## What was built
 
 - **The block.** `packages/canonical-model/src/document-posting.ts`: an optional v6 operation key `documentPosting`
@@ -89,3 +91,8 @@ the block, owns conversion; one document makes one entry per ordinal.
 - 1a-ii review: R1 no change (the channel claim is existing gateway design); R3 engine grants stay add-only, owed to
   the future role-admin writer; R4 owner call pending (demo grants unchanged); R5 and R7 already corrected on main.
 - The memo role is bound and read by no entry column (ADR-0093 has none); it stays the document's.
+- Silent-harm review (Mythos, MERGE, `/home/rvham/2rain-missions/DOCUMENT-POSTING-s1-review.result.txt`): N1 applied
+  before the full run (the preparation read answers null unless the caller holds journal_post for the draft's company,
+  so it is no existence oracle, binding amendment 3); N2 is amendment 10 above; N3 (the trust metadata's company is
+  the preparation read's; a company is immutable after create today) and N4 (a Customize patch may swap the debit and
+  credit option bindings, a visible tenant edit) are recorded, not built.
