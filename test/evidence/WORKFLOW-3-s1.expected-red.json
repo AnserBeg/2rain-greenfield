@@ -253,6 +253,11 @@
           "file": "test/unit/workflow-triggers.test.ts",
           "name": "recordTransitioned admission refuses by name what no generic writer alone moves",
           "expected": "northstar.app:machine.purchase_order_lifecycle"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "only machines every transition of which a generic operation performs offer states",
+          "expected": "a machine another writer moves offers no state"
         }
       ]
     },

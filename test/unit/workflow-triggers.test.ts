@@ -533,8 +533,16 @@ test('only machines every transition of which a generic operation performs offer
     state('scheduled'),
     state('in_progress'),
   ]);
-  assert.equal(targets.has(id('entity.purchase_order')), false);
-  assert.equal(targets.has(id('entity.sales_order')), false);
+  assert.equal(
+    targets.has(id('entity.purchase_order')),
+    false,
+    'a machine another writer moves offers no state',
+  );
+  assert.equal(
+    targets.has(id('entity.sales_order')),
+    false,
+    'a machine another writer moves offers no state',
+  );
   const lines = workflowTriggerDrafterLines(
     [inspection],
     [
