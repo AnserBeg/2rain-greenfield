@@ -12,6 +12,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { expectedMigrationNames } from '../helpers/migration-list.js';
 
 const checkedInMigrations = resolve('db/migrations');
 const contractReleaseRoot =
@@ -43,7 +44,7 @@ test('inventory platform authority is limited to calendars and release-recorded 
       try {
         const migrations = await loadMigrations(checkedInMigrations);
         const migrated = await runMigrations(admin, migrations);
-        assert.equal(migrated.applied.at(-1), '0076_open_items.sql');
+        assert.equal(migrated.applied.at(-1), expectedMigrationNames().at(-1));
         assert.equal(migrated.verified.length, migrations.length);
         await seedTenant(admin, tenantA, environmentA, 'tenant-a');
         await seedTenant(admin, tenantB, environmentB, 'tenant-b');

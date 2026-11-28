@@ -1,0 +1,12 @@
+{
+  "$comment": "BUILD-MODE-1: build mode until the first customer. Each switch relaxes exactly one pre-tenant gate; money, authority and isolation checks are untouched. The hardening pass sets enabled to false (or one switch to false) before the first tenant. NORTH_STAR_BUILD_MODE=off in the environment forces every switch off; nothing can force one on. See docs/execution/build-mode.md.",
+  "enabled": true,
+  "switches": {
+    "migrationListByGlob": true,
+    "recordChecksReportOnly": true,
+    "languageCoverageDigestRegeneration": true,
+    "nameGuardReportOnly": true,
+    "trainCapLifted": true
+  },
+  "version": 1
+}

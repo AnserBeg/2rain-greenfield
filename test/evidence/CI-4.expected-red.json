@@ -60,7 +60,7 @@
       "name": "ci4-train-cap",
       "claim": "The merge window admits at most three packet merges.",
       "file": "scripts/check-merge-window.mjs",
-      "original": "if (chain.length > 3)",
+      "original": "if (!trainCapLifted && chain.length > 3)",
       "replacement": "if (false)",
       "test": {
         "files": ["test/architecture/ci-main-push.test.ts"],

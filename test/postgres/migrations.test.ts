@@ -14,6 +14,7 @@ import {
   SchemaDriftError,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { expectedMigrationNames } from '../helpers/migration-list.js';
 
 const checkedInMigrations = resolve('db/migrations');
 const checkedInSnapshot = resolve('db/schema.snapshot.json');
@@ -282,7 +283,7 @@ test('inventory migration owns exactly two platform relations and no managed-mod
       const client = await pool.connect();
       try {
         const migrations = await loadMigrations(checkedInMigrations);
-        assert.equal(migrations.at(-1)?.name, '0076_open_items.sql');
+        assert.equal(migrations.at(-1)?.name, expectedMigrationNames().at(-1));
         const inventoryMigrationIndex = migrations.findIndex(
           (migration) =>
             migration.name === '0015_inventory_storage_foundation.sql',

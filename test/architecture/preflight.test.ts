@@ -11,6 +11,7 @@ import {
   replaySnapshotWarning,
   steps,
 } from '../../scripts/preflight.mjs';
+import { buildModeSwitch } from '../../scripts/build-mode.mjs';
 
 /**
  * CI-8. `pnpm preflight` finds, without PostgreSQL, the mechanical reds lanes
@@ -185,21 +186,57 @@ test('a stale language-coverage digest, decision or observation snapshot is name
     observationSnapshot: Record<string, unknown>;
   };
   const dir = mkdtempSync(join(tmpdir(), 'ci-8-coverage-'));
-  const run = (edit: (document: typeof original) => void) => {
+  const path = join(dir, 'decisions.json');
+  const run = (
+    edit: (document: typeof original) => void,
+    buildMode: 'off' | 'on' = 'off',
+  ) => {
     const document = structuredClone(original);
     edit(document);
-    const path = join(dir, 'decisions.json');
     writeFileSync(path, JSON.stringify(document));
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      PREFLIGHT_DECISIONS_PATH: path,
+    };
+    // BUILD-MODE-1: the strict behaviour is what this test pins.
+    if (buildMode === 'off') env.NORTH_STAR_BUILD_MODE = 'off';
+    else delete env.NORTH_STAR_BUILD_MODE;
     return spawnSync(
       process.execPath,
       ['--import', 'tsx', 'test/helpers/preflight-language-coverage.ts'],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, PREFLIGHT_DECISIONS_PATH: path },
-      },
+      { encoding: 'utf8', env },
     );
   };
   try {
+    // BUILD-MODE-1 (languageCoverageDigestRegeneration on, as build-mode.json
+    // ships): a stale digest is regenerated in place, rationale unchanged;
+    // an obligation kind outside the reviewed list still fails.
+    if (buildModeSwitch('languageCoverageDigestRegeneration')) {
+      const regenerated = run((value) => {
+        value.ledgerDigest = 'sha256:stale';
+        if (value.decisions[0] === undefined) throw new Error('no decisions');
+        value.decisions[0].ledgerDigest = 'sha256:stale';
+        value.observationSnapshot = { stale: true };
+      }, 'on');
+      assert.equal(regenerated.status, 0, regenerated.stderr);
+      assert.match(regenerated.stdout, /\(build mode\): regenerated/u);
+      const rewritten = JSON.parse(
+        readFileSync(path, 'utf8'),
+      ) as typeof original & {
+        decisions: { rationale: string }[];
+      };
+      assert.deepEqual(rewritten, original);
+      const newKind = run((value) => {
+        (value as unknown as { obligationKinds: string[] }).obligationKinds = (
+          value as unknown as { obligationKinds: string[] }
+        ).obligationKinds.slice(1);
+      }, 'on');
+      assert.equal(newKind.status, 1);
+      assert.match(
+        newKind.stderr,
+        /LANGUAGE_COVERAGE_PREFLIGHT_NEW_OBLIGATION_KIND/u,
+      );
+    }
     const clean = run(() => undefined);
     assert.equal(clean.status, 0, clean.stderr);
     const document = run((value) => {

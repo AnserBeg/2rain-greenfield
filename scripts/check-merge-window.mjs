@@ -7,6 +7,7 @@ import process from 'node:process';
 import console from 'node:console';
 import { git, requiresFull } from '../.github/scripts/ci-selection.mjs';
 export { docsOnly } from '../.github/scripts/ci-selection.mjs';
+import { buildModeSwitch } from './build-mode.mjs';
 
 const api = (path) =>
   JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' }));
@@ -73,18 +74,22 @@ export function exactFull(run, candidate, jobs) {
   );
 }
 
-function checkTrain(base, candidate) {
+// BUILD-MODE-1, switch `trainCapLifted`: before the first tenant a train may
+// hold any number of merges. Every other rule is unchanged: each commit is a
+// two-parent merge, the first-parent chain ends at current origin/main, and
+// the exact tip still needs its full green below.
+export function checkTrain(base, candidate, trainCapLifted = false) {
   const chain = git(
     'rev-list',
     '--first-parent',
     '--parents',
-    '--max-count=4',
+    ...(trainCapLifted ? [] : ['--max-count=4']),
     `${base}..${candidate}`,
   )
     .trim()
     .split('\n')
     .map((line) => line.split(' '));
-  if (chain.length > 3)
+  if (!trainCapLifted && chain.length > 3)
     throw new Error('A train may contain at most three merges');
   if (chain.some((commit) => commit.length !== 3))
     throw new Error('Every train commit must be a two-parent merge');
@@ -100,7 +105,7 @@ function checkWindow(packet, candidate) {
   process.chdir(git('rev-parse', '--show-toplevel').trim());
   git('fetch', 'origin', 'main');
   const base = git('rev-parse', 'origin/main').trim();
-  checkTrain(base, candidate);
+  checkTrain(base, candidate, buildModeSwitch('trainCapLifted'));
   const latest = lastMainConclusion(
     workflowRuns('branch=main&event=push'),
     (run) =>

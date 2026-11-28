@@ -141,6 +141,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
+      'test/architecture/build-mode.test.ts',
       'test/architecture/business-calendar.test.ts',
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/ci-main-push.test.ts',

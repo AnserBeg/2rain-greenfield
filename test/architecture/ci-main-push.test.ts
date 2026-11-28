@@ -230,8 +230,10 @@ test('a Critical packet change with selectable tests stays quick', (t) => {
   );
 });
 
-function train(t: TestContext) {
+function train(t: TestContext, buildMode?: string) {
   const { dir, repo, git, base, commit } = repository(t);
+  // BUILD-MODE-1: a tree may carry build-mode.json; without one it is strict.
+  if (buildMode !== undefined) commit('build-mode.json', buildMode);
   // This file first enters main with the new one-row-per-merge rule.
   const start = commit('test/evidence/CI-4.expected-red.json', '{}');
   git('init', '-q', '--bare', join(dir, 'origin.git'));
@@ -261,12 +263,14 @@ esac
 `,
     { mode: 0o755 },
   );
-  const check = (tip: string, green = tip) =>
+  const check = (tip: string, green = tip, env: Record<string, string> = {}) =>
     spawnSync(process.execPath, [windowGate, 'TRAIN-fixture', tip], {
       cwd: repo,
       encoding: 'utf8',
       env: {
         ...process.env,
+        NORTH_STAR_BUILD_MODE: undefined,
+        ...env,
         PATH: `${dir}:${process.env.PATH}`,
         GREEN_SHA: green,
         MERGE_WINDOW_FILE: join(dir, 'token'),
@@ -303,6 +307,62 @@ test('a train refuses a fourth merge', (t) => {
   const result = check(tip);
   assert.equal(result.status, 1, 'fourth merge admitted');
   assert.match(result.stderr, /at most three/u);
+});
+
+const trainCapLifted = JSON.stringify({
+  enabled: true,
+  switches: { trainCapLifted: true },
+  version: 1,
+});
+
+test('BUILD-MODE-1: build mode admits a train of five merges and keeps every other train rule', (t) => {
+  const { start, packet, merge, commit, check } = train(t, trainCapLifted);
+  let tip = start;
+  for (const path of ['a', 'b', 'c', 'd', 'e']) tip = merge(tip, packet(path));
+  const admitted = check(tip);
+  assert.equal(admitted.status, 0, admitted.stderr);
+  assert.match(admitted.stdout, /Merge window open/u);
+  // Still the exact full green on the tip.
+  const notGreen = check(tip, start);
+  assert.equal(notGreen.status, 1);
+  assert.match(notGreen.stderr, /Missing green full CI/u);
+  // Still two-parent merges only.
+  const plain = commit('plain.ts', 'plain commit');
+  const withPlain = check(merge(plain, packet('f')));
+  assert.equal(withPlain.status, 1);
+  assert.match(withPlain.stderr, /two-parent merge/u);
+  const octopus = check(merge(start, packet('g'), packet('h')));
+  assert.equal(octopus.status, 1);
+  assert.match(octopus.stderr, /two-parent merge/u);
+});
+
+test('BUILD-MODE-1: with the train switch off the fourth merge is refused again', (t) => {
+  for (const config of [
+    JSON.stringify({
+      enabled: false,
+      switches: { trainCapLifted: true },
+      version: 1,
+    }),
+    JSON.stringify({
+      enabled: true,
+      switches: { trainCapLifted: false },
+      version: 1,
+    }),
+  ]) {
+    const { start, packet, merge, check } = train(t, config);
+    let tip = start;
+    for (const path of ['a', 'b', 'c', 'd']) tip = merge(tip, packet(path));
+    const result = check(tip);
+    assert.equal(result.status, 1, 'fourth merge admitted');
+    assert.match(result.stderr, /at most three/u);
+  }
+  // The environment can only force strict, never relax.
+  const { start, packet, merge, check } = train(t, trainCapLifted);
+  let tip = start;
+  for (const path of ['a', 'b', 'c', 'd']) tip = merge(tip, packet(path));
+  const forced = check(tip, tip, { NORTH_STAR_BUILD_MODE: 'off' });
+  assert.equal(forced.status, 1, 'fourth merge admitted with build mode off');
+  assert.match(forced.stderr, /at most three/u);
 });
 
 test('an octopus is refused even with a full green', (t) => {
