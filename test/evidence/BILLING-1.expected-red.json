@@ -1179,6 +1179,186 @@
           "expected": "an evidence source with no early return"
         }
       ]
+    },
+    {
+      "name": "billing-term-held-cycles",
+      "claim": "A fee minimum term owes the cycles from the service end to the term end at an early end (E1m): August and Sep 1-10 are not lost.",
+      "file": "packages/domain/src/billing/occurrences.ts",
+      "original": ".filter((o) => o.start >= binding.start)",
+      "replacement": ".filter((o) => o.start >= binding.end)",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: a fixed minimum term bills to the term end at an early end \\(E1m\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: a fixed minimum term bills to the term end at an early end (E1m)",
+          "expected": "-\\s+'2027-08-01T06:00:00.000Z'"
+        }
+      ]
+    },
+    {
+      "name": "billing-term-prorated-to-end",
+      "claim": "Cycles held by a fee minimum term are rated on the term alone, never on an open-ended agreed interval: September is 90.00, not 300.00.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "o.term ? held :",
+      "replacement": "o.term ? opened :",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: a fixed minimum term bills to the term end at an early end \\(E1m\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: a fixed minimum term bills to the term end at an early end (E1m)",
+          "expected": "\\+\\s+'30000'\\n\\s*-\\s+'9000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-term-arrears-final-review",
+      "claim": "An arrears fee with a minimum term bills to the term end in the review that reaches the service end.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "through === serviceEnd\n          ? bindingTerm(",
+      "replacement": "through === Number.NaN\n          ? bindingTerm(",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: an arrears fee with a minimum term bills to the term end in its final review$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: an arrears fee with a minimum term bills to the term end in its final review",
+          "expected": "\\+\\s+'11129'\\n\\s*-\\s+'30000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-committed-cycle-clip",
+      "claim": "Slice-a correction (ruling 2026-11-28): an advance cycle opening after the last return is rated on the committed interval only, so the early-return term form charges 900.00, not 1110.00.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "o.start >= committedFrom ? committed",
+      "replacement": "o.start >= Number.POSITIVE_INFINITY ? committed",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: the early-return term form charges exactly the term too \\(slice-a correction\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: the early-return term form charges exactly the term too (slice-a correction)",
+          "expected": "\\+\\s+'30000'\\n\\s*-\\s+'9000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-discount-after-cap",
+      "claim": "B13: a percent discount reduces the capped amount (after the minimum and the cap), never the uncapped cover.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "totalNet = totalNet.plus(net.times(keep));",
+      "replacement": "totalNet = totalNet.plus(gross.times(keep));",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B13: a percent discount applies after the minimum and the cap \\(E3\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B13: a percent discount applies after the minimum and the cap (E3)",
+          "expected": "'27000' !== '21600'"
+        }
+      ]
+    },
+    {
+      "name": "billing-discount-net-entitlement",
+      "claim": "The discounted line's entitlement is the net: the discount is not dropped from the charged amount.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "const cents = earned.cents(),",
+      "replacement": "const cents = gross.cents(),",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B13: a percent discount applies after the minimum and the cap \\(E3\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B13: a percent discount applies after the minimum and the cap (E3)",
+          "expected": "'10000' !== '9000'"
+        }
+      ]
+    },
+    {
+      "name": "billing-percentage-at-most-100",
+      "claim": "publishRateTable refuses a percentage above 100 in every table, overrides included, so no discount produces a negative net.",
+      "file": "packages/domain/src/billing/terms.ts",
+      "original": "decimal(value).compare(integer(100)) > 0",
+      "replacement": "decimal(value).compare(integer(100)) > 1",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B13: a percentage above 100 refuses in every table, overrides included$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B13: a percentage above 100 refuses in every table, overrides included",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "billing-percentage-stage",
+      "claim": "A percentage component rates its base at the named stage: net is after the base discount.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "c.base.stage === 'gross' ? base.gross : base.net",
+      "replacement": "c.base.stage === 'gross' ? base.gross : base.gross",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B13: a percentage component rates its base at the named stage \\(E5\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B13: a percentage component rates its base at the named stage (E5)",
+          "expected": "\\+\\s+'2880'\\n\\s*-\\s+'2592'"
+        }
+      ]
+    },
+    {
+      "name": "billing-pricing-reader",
+      "claim": "A fee minimum term, a discount or a percentage component takes the pricing reader: rung 56 (timing only) refuses it by name.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "floor: priced",
+      "replacement": "floor: false",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: refusals and the pricing reader$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: refusals and the pricing reader",
+          "expected": "\\+\\s+floor: 56\\n\\s*-\\s+floor: 57"
+        }
+      ]
+    },
+    {
+      "name": "billing-v5-key-states-timing",
+      "claim": "Any calculation v5 key, not only a timing key, requires stated timing on every time and recurring fixed component.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "if (hasBillingV5Keys(plan)) {",
+      "replacement": "if (hasBillingTiming(plan)) {",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: refusals and the pricing reader$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: refusals and the pricing reader",
+          "expected": "a minimum term with no stated timing"
+        }
+      ]
     }
   ]
 }
