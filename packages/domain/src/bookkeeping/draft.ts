@@ -389,7 +389,18 @@ export function bookkeepingDraftDeclarations(
           [ids.optionIds.opening, 'Opening'],
         ]),
       ),
-      field(draft, ids.fieldIds.currency, 'Currency', 20, textType(3)),
+      // Searchable, as the purchase order's currency is: release verification
+      // proves a non-searchable text field's value is not found by search, and
+      // a three-letter value is a substring of the memo's.
+      field(
+        draft,
+        ids.fieldIds.currency,
+        'Currency',
+        20,
+        textType(3),
+        false,
+        true,
+      ),
       field(draft, ids.fieldIds.date, 'Date', 30, {
         calendar: 'iso8601',
         kind: 'dateFieldType',
