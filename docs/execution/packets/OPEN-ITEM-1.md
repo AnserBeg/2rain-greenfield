@@ -3,7 +3,7 @@
 ## Slice 2 · Void, unapply, credit notes, and s1's owed notes — record
 Status: built (thin path: void, unapply, a credit note applied beside a receipt, the four owed notes); Critical (money, rule 24): one Mythos silent-harm review in parallel with CI. Branch `packet/OPEN-ITEM-1-s2`, cut from `origin/main` 8104e7498 (TRAIN-Z). Floor: operation catalog 9 -> 10 (`OPEN_ITEM_OPERATION_READER`). No migration (0076's grant check already admits any `northstar.openitem` capability; the receipt check holds because each change document names `input.recordId`). Stops taken: one, reported (per-target change documents, below).
 
-CI tier: pending
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46173720200
 
 **Claims.**
 1. Declarations: an open item may name `void {operationId, transitionId}` (the machine's open -> void transition); an application type may name `unapplyOperationId`. Both refuse unless person-confirmed core operations of their capability (`open_item_void`, `open_item_unapply`) reading back the item or application type.
@@ -21,13 +21,20 @@ CI tier: pending
 - Not built (remains): note (b), a Customize member declaring the role (rule 12: drafting support and eval cases), which also makes an application type's name optional; the event consumer.
 
 **Controls** (`test/evidence/OPEN-ITEM-1-s2.expected-red.json`, 6 silent-harm entries): void balance, unapply state, policy changed, isolation, currency missing, direction. Void-only-from-open, unapply's own-source and live-once checks each have a second layer (state plus applied; prepare plus the locked re-read; the ledger gate), so they have reds but no single-layer control.
+Evidence run 46170763314 (on b87595e4a): 5 of 6 killed; open-item-s2-unapply-state also redded the credit-note subtest (the credit note's own return to open), now declared as a second kill and re-run in 46173701586.
+
+**Review.** Mythos pre-merge silent-harm review: MERGE, no finding (`OPEN-ITEM-1-s2-review.result.txt`). Its non-blocking notes: apply/v1 gained required ledgers without a new version (an s1-compiled release is refused whole by floor 10: part of the owed preceding-binary proof); unapply's read-back names a line it just archived (it may read back null; outcome still succeeded); unapply moves states without a declared transition, as apply does; prepare's refusal reasons reveal whether a guessed line ID exists (s1's apply does the same for targets). No production change after the review, so no targeted check.
+
+**Local run (approved by the orchestrator, one run under the lock):** 13 of 15 subtests passed; the two failures were the test's own zero spelling (`0` vs `0.00` from `coalesce(sum, 0)`), fixed in the helper.
 
 **Test it yourself.** Read the s2 subtests in `test/postgres/open-items.test.ts`: a 15.00 fee note voided keeps FN-number and owes 0.00; a 100.00 note part-paid 30.00 by a receipt takes a 50.00 credit note CN-000001 (applied 80.00, balance 20.00), and a second 30.00 credit note is refused; unapplying the credit note brings it back to 30.00 / 70.00.
+
+(One record-claim block per record file: slice 1's block below stands; slice 2's changed paths are its code commits b87595e4a and earlier on this branch.)
 
 ## Slice 1 · Draft -> issue (numbered per company) -> one payment applied, two companies — record
 Status: built to the thin first slice of the design read (`OPEN-ITEM-1-core-v2-design-read.result.txt`, APPROVE WITH AMENDMENTS) over design note `notes/OPEN-ITEM-1-core-v2`; Critical (money, rule 24): one Mythos silent-harm review in parallel with CI. Branch `packet/OPEN-ITEM-1-s1`, cut from `origin/main` 63826f6c0 (TRAIN-X). Floor: operation catalog 8 -> 9 (`OPEN_ITEM_OPERATION_READER`; kept at TRAIN-Z, where main's operation maximum is 8). Migration `0076_open_items.sql` (provisional 0075; renamed at TRAIN-Z because main's 0075 is WORKFLOW-3 s1's `0075_record_transition_occurrences.sql`). Stops taken: none.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46152264620
+Slice 1 full run (its CI tier line until slice 2): https://github.com/AnserBeg/2rain-greenfield/actions/runs/46152264620
 
 **Claims.**
 1. Two optional v6 keys (`openItems`, `openItemApplications`; emitted only when declared, first-party and demo releases byte-identical). An open item names `direction` (receivable/payable), `side` (debit/credit), counterparty relation, create-only currency, number, optional document and due dates, subtotal, total, applied, balance, either a parent-scoped line relation with its amount or an entered amount, a five-state map over its own machine, and its issue operation and transition.
