@@ -15,6 +15,11 @@ export interface ServiceUseInput {
 }
 type EarlyReturn = NonNullable<ServiceUseInput['earlyReturn']>;
 
+/** The identity of a band's committed interval: the time from the last
+ * return to a service end held later by a declared early-return rule. */
+export const committedIntervalId = (bandId: string) =>
+  JSON.stringify(['committed', bandId]);
+
 /** Actual use sets the service end (ADR-0083, calculation v3). A live use
  * leg keeps the service open, so cycles continue through the review instant.
  * Once every leg is returned the service ends at the later of the agreed end
@@ -115,7 +120,7 @@ export function serviceUseCoverage(
     Date.parse(serviceEnd) > lastReturn
   )
     intervals.push({
-      id: JSON.stringify(['committed', bandId]),
+      id: committedIntervalId(bandId),
       revision: snapshot.cursor,
       start: new Date(lastReturn).toISOString(),
       end: serviceEnd,

@@ -4,7 +4,7 @@ import {
   BILLING_RULES_CALCULATION,
   BILLING_TIMING_CALCULATION,
   hasBillingRules,
-  hasBillingTiming,
+  hasBillingV5Keys,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import {
@@ -30,11 +30,13 @@ import {
 } from './cover.js';
 import { decimal, type Fraction, integer, one, zero } from './fraction.js';
 import {
+  bindingTerm,
   occurrences,
-  openedOccurrences,
+  owedAdvanceOccurrences,
   pricingWindows,
   type Occurrence,
 } from './occurrences.js';
+import { committedIntervalId } from './service-use.js';
 import {
   compileRatePlan,
   digest,
@@ -142,7 +144,7 @@ function planCalculation<T extends CalculationVersion>(
   plan: unknown,
   otherwise: T,
 ) {
-  return hasBillingTiming(plan)
+  return hasBillingV5Keys(plan)
     ? BILLING_TIMING_CALCULATION
     : hasBillingRules(plan)
       ? BILLING_RULES_CALCULATION
@@ -245,8 +247,9 @@ function calculate(
       : (algorithm === BILLING_CYCLE_CALCULATION) !== cycle
   )
     throw new Error('Billing cycle requires its coverage boundary');
-  // Calculation v5 rates timing beside any rule key; v4 only rule keys.
-  const timed = hasBillingTiming(plan);
+  // Calculation v5 rates timing and the pricing keys beside any rule key; v4
+  // only rule keys.
+  const timed = hasBillingV5Keys(plan);
   if (timed !== (algorithm === BILLING_TIMING_CALCULATION))
     throw new Error('Billing timing requires calculation v5');
   if (
@@ -496,6 +499,22 @@ function calculate(
           .eligible,
       ])
     : [];
+  // A declared early-return rule can hold the service end past the last
+  // return (its minimum term, or the agreed end): the committed interval
+  // from the return to that end. A cycle that opens after the return is owed
+  // only because of that hold, so it is rated on the committed interval
+  // alone, never on the agreed interval (ruling 2026-11-28: a minimum term is
+  // charged exactly, prorated, never more).
+  const committed = advance.length
+    ? union(
+        e.bands.flatMap((b) =>
+          b.intervals
+            .filter((s) => s.id === committedIntervalId(b.id) && s.end)
+            .map((s) => ({ start: instant(s.start), end: instant(s.end!) })),
+        ),
+      )
+    : [];
+  const committedFrom = committed[0]?.start ?? Number.POSITIVE_INFINITY;
   for (const c of advanceOnly ? advance : plan.components) {
     if (c.kind === 'fixed') {
       const fee = c.occurrence;
@@ -531,20 +550,33 @@ function calculate(
         continue;
       }
       if (isAdvanceFee(c)) {
-        for (const o of openedOccurrences(
+        // A binding minimum term adds [service end, term end): cycles that
+        // open only because of it are rated on the term alone, never on the
+        // agreed interval past the service end.
+        const { owed, binding } = owedAdvanceOccurrences(
           calendar,
           fee.cadence,
+          c.minimumTerm,
           asOf,
           serviceEnd,
-        )) {
-          const ms = covered(advanceCoverage, o.start, o.fullEnd);
+        );
+        const held = binding ? [binding] : [];
+        const opened = binding
+          ? union([...advanceCoverage, binding])
+          : advanceCoverage;
+        for (const o of owed) {
+          const ms = covered(
+            o.term ? held : o.start >= committedFrom ? committed : opened,
+            o.start,
+            o.fullEnd,
+          );
           const fraction = prorate(ms, o, fee.feeProration),
             t = terms(o.start).table;
           line(
             c,
             occurrenceId('fee', iso(o.fullStart)),
             o.start,
-            o.fullEnd,
+            o.term ? o.end : o.fullEnd,
             decimal(t.values[c.amount]!).times(fraction).times(quantity),
             [
               {
@@ -555,22 +587,31 @@ function calculate(
                 basisMs: o.fullEnd - o.fullStart,
                 fraction: fraction.toString(),
                 ...perQuantity,
+                ...(binding && { minimumTermEnd: iso(binding.end) }),
               },
             ],
           );
         }
         continue;
       }
-      for (const o of occurrences(
-        calendar,
-        fee.cadence,
-        through,
-        serviceEnd,
-      ).filter((o) => o.closed)) {
+      // In arrears a binding term is due in the review that reaches the
+      // service end: the cycles to the term end are rated on actual coverage
+      // united with [service end, term end), each under its natural identity.
+      const binding =
+        through === serviceEnd
+          ? bindingTerm(calendar, c.minimumTerm, serviceEnd, through)
+          : null;
+      const actual =
+        fee.fixedFeeDuringPause === 'suspend'
+          ? coverage.active
+          : coverage.eligible;
+      for (const o of binding
+        ? occurrences(calendar, fee.cadence, binding.end, null)
+        : occurrences(calendar, fee.cadence, through, serviceEnd).filter(
+            (o) => o.closed,
+          )) {
         const ms = covered(
-          fee.fixedFeeDuringPause === 'suspend'
-            ? coverage.active
-            : coverage.eligible,
+          binding ? union([...actual, binding]) : actual,
           o.start,
           o.end,
         );
@@ -590,6 +631,7 @@ function calculate(
               basisMs: o.fullEnd - o.fullStart,
               fraction: fraction.toString(),
               ...perQuantity,
+              ...(binding && { minimumTermEnd: iso(binding.end) }),
             },
           ],
         );

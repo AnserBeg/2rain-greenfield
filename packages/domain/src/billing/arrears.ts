@@ -6,15 +6,8 @@ import {
 } from '../../../canonical-model/src/billing.js';
 import type { BillingQuoteEvidence } from '../../../canonical-model/src/billing-evidence.js';
 import { ServiceUseSnapshotSchema } from '../../../canonical-model/src/service-evidence.js';
-import {
-  BillingCalendar,
-  hourMs,
-  instant,
-  iso,
-  monthShift,
-} from './calendar.js';
-import { periodDays } from './cover.js';
-import { occurrences, openedOccurrences } from './occurrences.js';
+import { BillingCalendar, instant, iso } from './calendar.js';
+import { occurrences, owedAdvanceOccurrences, termEnd } from './occurrences.js';
 import { isAdvanceFee, quoteBillingCycle } from './quote.js';
 import { digest } from './terms.js';
 import {
@@ -58,7 +51,8 @@ export function dueArrearsCycle(
 /** B2: the advance cycles owed at the review instant, for every advance fee.
  * They are owed whether or not an earlier review saw them (a late first
  * review still owes every opened cycle), and none opens at or after the
- * service end (keepPaidPeriod). */
+ * service end (keepPaidPeriod) unless the fee's minimum term holds it: then
+ * the cycles to the term end are owed at the service end. */
 export function dueAdvanceCycles(
   plan: BillingPlan,
   evidence: Pick<
@@ -71,15 +65,16 @@ export function dueAdvanceCycles(
     evidence.serviceEnd === null ? null : instant(evidence.serviceEnd);
   return plan.components.flatMap((c) =>
     isAdvanceFee(c)
-      ? openedOccurrences(
+      ? owedAdvanceOccurrences(
           calendar,
           c.occurrence.cadence,
+          c.minimumTerm,
           instant(evidence.asOf),
           end,
-        ).map((o) => ({
+        ).owed.map((o) => ({
           componentId: c.id,
           start: iso(o.start),
-          end: iso(o.fullEnd),
+          end: iso(o.term ? o.end : o.fullEnd),
         }))
       : [],
   );
@@ -157,10 +152,8 @@ function minimumTermEnd(
   evidence: Pick<BillingQuoteEvidence, 'anchor' | 'zone'>,
   term: { period: BillingPeriod; count: number },
 ) {
-  const anchor = instant(evidence.anchor);
-  if (term.period === 'hour') return anchor + term.count * hourMs;
-  const calendar = new BillingCalendar(anchor, evidence.zone);
-  return term.period === 'month'
-    ? calendar.resolve(monthShift(calendar.wallAnchor, term.count))
-    : calendar.day(term.count * periodDays(term.period, 0));
+  return termEnd(
+    new BillingCalendar(instant(evidence.anchor), evidence.zone),
+    term,
+  );
 }

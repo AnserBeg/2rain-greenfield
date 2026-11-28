@@ -19,6 +19,11 @@ export const BILLING_RULES_CALCULATION = 'northstar.billing-calculation/v4';
  * reader. Assigned at TRAIN-Z (55 is WORKFLOW-3 s1). */
 export const BILLING_TIMING_READER = 56;
 export const BILLING_TIMING_CALCULATION = 'northstar.billing-calculation/v5';
+/** Pricing adjustments under calculation v5 (BILLING-1 s3a-ii-b): a minimum
+ * term on a recurring fixed fee, percent discounts, percentage components and
+ * percentage slots. Rung 56 admits timing only, so a plan that declares any of
+ * these takes its own rung. Provisional: renumbered at merge. */
+export const BILLING_PRICING_READER = 57;
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [
@@ -35,6 +40,7 @@ const period = z.enum(billingPeriods);
 const civilPeriod = z.enum(['day', 'week', 'fourWeek', 'month']);
 const proration = z.enum(['activeCoverage', 'none']);
 const periodSlots = z.partialRecord(period, id);
+const term = z.strictObject({ period, count: z.int().min(1).max(744) });
 const common = { id, taxClassification: id };
 // B2. Absent means arrears, so v2-v4 bytes replay unchanged; a plan that
 // states timing on any component states it on every time and recurring fixed
@@ -115,6 +121,10 @@ const component = z.discriminatedUnion('kind', [
     // The amount is per unit of the service's one commercial quantity.
     perQuantity: z.literal(true).optional(),
     timing,
+    // A minimum charge from the agreed start (B2, calculation v5): when the
+    // service ends before the term has elapsed, the fee for the cycles up to
+    // the term's end falls due at the service end. Recurring fees only.
+    minimumTerm: term.optional(),
     occurrence: z.discriminatedUnion('kind', [
       z.strictObject({
         kind: z.literal('oneOff'),
@@ -238,6 +248,12 @@ export const BillingPlanSchema = z
             unit: id,
             scale: z.int().min(0).max(9),
           }),
+          // A percentage, 0 to 100 (publishRateTable refuses more).
+          z.strictObject({
+            id,
+            kind: z.literal('percentage'),
+            scale: z.int().min(0).max(4),
+          }),
         ]),
       )
       .min(1)
@@ -257,13 +273,16 @@ export const BillingPlanSchema = z
     for (const slot of slots.values())
       if (slot.kind === 'money' && slot.currency !== plan.currency)
         issue('Mixed billing currencies');
-    function check(key: string, unit?: string) {
+    function check(
+      key: string,
+      want: 'money' | 'percentage' | { unit: string } = 'money',
+    ) {
       const slot = slots.get(key);
       if (
         !slot ||
-        (unit === undefined
-          ? slot.kind !== 'money'
-          : slot.kind !== 'quantity' || slot.unit !== unit)
+        (typeof want === 'string'
+          ? slot.kind !== want
+          : slot.kind !== 'quantity' || slot.unit !== want.unit)
       )
         issue('Incompatible billing slot ' + key);
       used.add(key);
@@ -305,23 +324,39 @@ export const BillingPlanSchema = z
               Object.keys(basis.quantities).sort().join()
           )
             issue('Allowance must name every offer of one time component');
-          for (const ref of Object.values(basis.quantities)) check(ref, c.unit);
-        } else check(basis.quantity, c.unit);
+          for (const ref of Object.values(basis.quantities))
+            check(ref, { unit: c.unit });
+        } else check(basis.quantity, { unit: c.unit });
       }
     }
     if (used.size !== slots.size) issue('Unused or unknown billing slots');
-    // B2 timing (calculation v5). Only a recurring fixed fee bills in advance
-    // in this slice; every other admitted key is rated.
-    if (plan.components.some((c) => c.kind !== 'meter' && c.timing)) {
+    // Calculation v5 (B2 timing, then the s3a-ii-b pricing keys). Only a
+    // recurring fixed fee bills in advance; every other admitted key is rated.
+    // Any v5 key requires stated timing (no implicit timing under v5).
+    if (hasBillingV5Keys(plan)) {
       const arrears = plan.bindings?.arrearsSource;
       const source = arrears?.kind;
       for (const c of plan.components) {
         if (c.kind === 'meter') continue;
+        if (c.kind === 'time' && c.minimumDuration)
+          minimumFits(c.minimumDuration, plan.pricingWindow ?? 'month');
         const t = c.timing;
         if (c.kind === 'fixed' && c.occurrence.kind === 'oneOff') {
           if (t) issue('A one-off fee has no billing timing');
+          // A one-off is due once; a term has no cycles to hold.
+          if (c.minimumTerm) issue('A one-off fee has no minimum term');
           continue;
         }
+        // Two forms for one rule: the fee's term and the early-return term
+        // would each hold a different end (the read's amendment 6 keeps the
+        // early-return form admitted on its own).
+        if (
+          c.kind === 'fixed' &&
+          c.minimumTerm &&
+          arrears?.kind === 'evidenceQuery' &&
+          arrears.earlyReturn?.minimumTerm
+        )
+          issue('A plan states one minimum term form');
         if (!t) {
           issue(
             'A plan that states billing timing states it on every component',
@@ -355,6 +390,24 @@ export const BillingPlanSchema = z
             issue('Advance on service use requires a declared early return');
         }
       }
+    }
+    // A minimum duration is priced inside one pricing window (cover.ts), so
+    // one that can never fit any window would refuse every review. Only the
+    // certain cases refuse here; month lengths decide the rest at rating.
+    function minimumFits(
+      duration: { period: BillingPeriod; count: number },
+      window: z.infer<typeof civilPeriod>,
+    ) {
+      const longestWindowDays = { day: 1, week: 7, fourWeek: 28, month: 31 }[
+        window
+      ];
+      const fits =
+        duration.period === 'hour'
+          ? duration.count <= (longestWindowDays + 1) * 24
+          : duration.count *
+              { day: 1, week: 7, fourWeek: 28, month: 28 }[duration.period] <=
+            longestWindowDays;
+      if (!fits) issue('A minimum duration can never fit its pricing window');
     }
   });
 export const BillingPlansSchema = z
@@ -469,6 +522,29 @@ export function hasBillingTiming(plan: unknown): boolean {
   return plan.components.some((c) => isRecord(c) && c.timing !== undefined);
 }
 
+/** Whether a plan declares a calculation v5 pricing key (the pricing reader):
+ * a minimum term on a fixed fee, a discount, a percentage component or a
+ * percentage slot. It reads the stored JSON shape, as hasBillingRules does. */
+export function hasBillingPricing(plan: unknown): boolean {
+  if (!isRecord(plan)) return false;
+  const components = Array.isArray(plan.components) ? plan.components : [];
+  const slots = Array.isArray(plan.slots) ? plan.slots : [];
+  return (
+    components.some(
+      (c) =>
+        isRecord(c) &&
+        (c.kind === 'percentage' ||
+          c.minimumTerm !== undefined ||
+          c.discount !== undefined),
+    ) || slots.some((s) => isRecord(s) && s.kind === 'percentage')
+  );
+}
+
+/** Whether a plan needs calculation v5: timing or a pricing key. */
+export function hasBillingV5Keys(plan: unknown): boolean {
+  return hasBillingTiming(plan) || hasBillingPricing(plan);
+}
+
 /** The calculation version and reader floor a set of stored plans requires.
  * `calculation` is undefined when no plan binds an agreed interval. */
 export function billingReleaseTerms(plans: unknown) {
@@ -478,7 +554,8 @@ export function billingReleaseTerms(plans: unknown) {
   const agreed = bound('agreedInterval');
   const arrears = bound('arrearsSource');
   const rules = list.some(hasBillingRules);
-  const timed = list.some(hasBillingTiming);
+  const timed = list.some(hasBillingV5Keys);
+  const priced = list.some(hasBillingPricing);
   return {
     agreed,
     calculation: !agreed
@@ -490,15 +567,17 @@ export function billingReleaseTerms(plans: unknown) {
           : arrears
             ? BILLING_CYCLE_CALCULATION
             : BILLING_CALCULATION_VERSION,
-    floor: timed
-      ? BILLING_TIMING_READER
-      : rules
-        ? BILLING_RULES_READER
-        : arrears
-          ? BILLING_ARREARS_READER
-          : agreed
-            ? BILLING_ALLOCATION_READER
-            : BILLING_READER,
+    floor: priced
+      ? BILLING_PRICING_READER
+      : timed
+        ? BILLING_TIMING_READER
+        : rules
+          ? BILLING_RULES_READER
+          : arrears
+            ? BILLING_ARREARS_READER
+            : agreed
+              ? BILLING_ALLOCATION_READER
+              : BILLING_READER,
   };
 }
 
@@ -536,6 +615,7 @@ export function billingReleaseMismatch(
         BILLING_ARREARS_READER,
         BILLING_RULES_READER,
         BILLING_TIMING_READER,
+        BILLING_PRICING_READER,
       ].includes(surfaceFloor))
   );
 }

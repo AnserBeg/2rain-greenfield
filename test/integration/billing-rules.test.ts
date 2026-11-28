@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BILLING_ARREARS_READER,
   BILLING_CYCLE_CALCULATION,
+  BILLING_PRICING_READER,
   BILLING_RULES_CALCULATION,
   BILLING_RULES_READER,
   BILLING_TIMING_CALCULATION,
@@ -11,6 +12,7 @@ import {
   billingEvidenceQuery,
   billingReleaseMismatch,
   billingReleaseTerms,
+  hasBillingPricing,
   hasBillingRules,
   hasBillingTiming,
 } from '../../packages/canonical-model/src/billing.js';
@@ -1546,4 +1548,313 @@ test('B2: timing selects calculation v5 and the timing reader; plans without it 
     () => quoteBillingCycle(plan, e1Evidence(timed, july), july),
     /cycle review and its agreed end/,
   );
+});
+
+// ---- BILLING-1 slice 3a-ii-b: the minimum charge from the agreed start ----
+// Measured before s3a-ii-b under Node 22.22.2 (zone data 2025c): later slices
+// must leave a v4 quote and a slice-a v5 review byte for byte.
+test('s3a-ii-b leaves v4 quotes and slice-a v5 reviews byte for byte', () => {
+  const v4 = timePlan({
+    combination: { rule: 'ladder', capAtNextTier: false },
+  });
+  const quote = quoteBillingService(v4, evidence(v4, 10, daily20weekly100));
+  assert.equal(
+    quote.resultDigest,
+    '4c1e4ae3e8c4b6ce334fc885e3425ce696a62a5be530913b969391bdc37f1918',
+  );
+  const agreed = reviewArrearsCharges(
+    compileRatePlan(advancePlan()).plan,
+    e1Evidence(advancePlan(), july),
+  );
+  assert.ok(agreed.status === 'due');
+  assert.equal(
+    agreed.quote.resultDigest,
+    '99c2bbca94fd3ce269e7a183f3d96bf28c07e032a57a1bc3f2cedcfafcf69544',
+  );
+  const late = useReview('2027-08-05T06:00:00.000Z');
+  assert.ok(late.status === 'due');
+  assert.equal(
+    late.quoteDigest,
+    'b8c37a9a8f8e7bf7cb64d0d1070673c3bd917fe933ce29d40f1e4f56babb3fa1',
+  );
+});
+
+// E2: CAD 30 a day, minimum duration 7 days per enrollment, actualEnd, booked
+// seven days, returned on day three: the minimum is owed at the return.
+function e2Plan() {
+  return {
+    ...timePlan(
+      {
+        minimumDuration: { period: 'day', count: 7 },
+        timing: { when: 'arrears' },
+      },
+      { day: 'd' },
+    ),
+    bindings: boundHire({ bill: 'actualEnd' }).bindings,
+  };
+}
+function e2Review(pickupDay: number, returnedDay = 3) {
+  const planInput = e2Plan();
+  const plan = compileRatePlan(planInput).plan;
+  const result = reviewArrearsCharges(
+    plan,
+    hireEvidence(planInput, returnedDay, 7),
+    {
+      snapshot: useSnapshot(returnedDay, returnedDay, pickupDay),
+      subjectId: subject,
+      owner,
+      earlyReturn: { bill: 'actualEnd' },
+    },
+  );
+  assert.ok(result.status === 'due');
+  assert.equal(result.quote.algorithm, BILLING_TIMING_CALCULATION);
+  return [
+    result.cycle!.end,
+    ...result.quote.lines.map((l) => l.differenceCents),
+  ];
+}
+
+test('B2 minimum: a time minimum is a minimum charge from the agreed start (E2)', () => {
+  // Due on day three (v4's early-return minimumTerm made it due on day seven).
+  assert.deepEqual(e2Review(0), [roll(3), '21000']);
+  // A late pickup does not move the minimum: picked up day one, still 210.00.
+  assert.deepEqual(e2Review(1), [roll(3), '21000']);
+  // Kept past the minimum, the time earned is billed.
+  assert.deepEqual(e2Review(0, 9), [roll(9), '27000']);
+});
+
+// E1m: E1 with a three-month minimum term (ends Sep 10).
+const threeMonths = { period: 'month', count: 3 } as const;
+const september = '2027-09-01T06:00:00.000Z',
+  termEnds = '2027-09-10T06:00:00.000Z';
+function termFee(timing: Timing, term: Authored | undefined = threeMonths) {
+  return {
+    ...feeComponent('rent', 'rent', timing),
+    ...(term && { minimumTerm: term }),
+  };
+}
+
+test('B2 minimum: a fixed minimum term bills to the term end at an early end (E1m)', () => {
+  const planInput = advancePlan({
+    source: 'use',
+    components: [termFee(advance)],
+  });
+  // Returned Jul 12: August 300.00 and Sep 1-10 90.00 fall due at the return.
+  // Total 900.00 = 3 x 300.
+  const e1m = [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '30000'],
+    ['rent', september, '9000'],
+  ];
+  for (const asOf of ['2027-07-12T19:00:00.000Z', '2027-09-15T06:00:00.000Z'])
+    assert.deepEqual(
+      reviewLines(useReview(asOf, e1Return, asOf, planInput)),
+      e1m,
+    );
+  const review = useReview(
+    '2027-07-12T19:00:00.000Z',
+    e1Return,
+    undefined,
+    planInput,
+  );
+  assert.ok(review.status === 'due');
+  assert.deepEqual(review.advance?.at(-1), {
+    componentId: 'rent',
+    start: september,
+    end: termEnds,
+  });
+  // While the equipment is out the term holds nothing back.
+  assert.deepEqual(
+    reviewLines(
+      useReview('2027-07-05T06:00:00.000Z', null, undefined, planInput),
+    ),
+    e1m.slice(0, 2),
+  );
+  // Returned after the term end, the term is spent: cycles open as before.
+  assert.deepEqual(
+    reviewLines(
+      useReview(
+        '2027-09-25T06:00:00.000Z',
+        '2027-09-20T06:00:00.000Z',
+        undefined,
+        planInput,
+      ),
+    ),
+    [...e1m.slice(0, 3), ['rent', september, '30000']],
+  );
+  // On an agreed interval the record's end is the service end: agreed to
+  // Jul 12, the term still bills to Sep 10.
+  const agreedInput = advancePlan({ components: [termFee(advance)] });
+  assert.deepEqual(
+    reviewLines(
+      reviewArrearsCharges(
+        compileRatePlan(agreedInput).plan,
+        e1Evidence(agreedInput, '2027-07-12T19:00:00.000Z', e1Return),
+      ),
+    ),
+    e1m,
+  );
+});
+
+test('B2 minimum: an arrears fee with a minimum term bills to the term end in its final review', () => {
+  const planInput = advancePlan({ components: [termFee({ when: 'arrears' })] });
+  const plan = compileRatePlan(planInput).plan;
+  const review = (periodStart: string) =>
+    reviewLines(
+      reviewArrearsCharges(plan, {
+        ...e1Evidence(planInput, '2027-07-13T06:00:00.000Z', e1Return),
+        periodStart,
+      }),
+    );
+  // The June cycle's review: the service has not ended within it.
+  assert.deepEqual(review(e1Start), [['rent', e1Start, '21000']]);
+  // The final review reaches the service end: July whole, August, Sep 1-10.
+  assert.deepEqual(review(july), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '30000'],
+    ['rent', september, '9000'],
+  ]);
+});
+
+test('B2 minimum: refusals and the pricing reader', () => {
+  const refused = (planInput: unknown, message: RegExp, reason: string) => {
+    const parsed = BillingPlanSchema.safeParse(planInput);
+    assert.equal(parsed.success, false, reason);
+    assert.match(JSON.stringify(parsed.error?.issues), message, reason);
+  };
+  refused(
+    advancePlan({
+      components: [
+        {
+          ...termFee(advance),
+          timing: undefined,
+          occurrence: { kind: 'oneOff', at: 'serviceStart' },
+        },
+      ],
+    }),
+    /one-off fee has no minimum term/,
+    'a minimum term on a one-off',
+  );
+  const use = advancePlan({
+    source: 'use',
+    components: [termFee(advance)],
+  }) as {
+    bindings: { arrearsSource: Record<string, unknown> };
+  };
+  refused(
+    {
+      ...use,
+      bindings: {
+        ...use.bindings,
+        arrearsSource: {
+          ...use.bindings.arrearsSource,
+          earlyReturn: { bill: 'actualEnd', minimumTerm: threeMonths },
+        },
+      },
+    },
+    /one minimum term form/,
+    'both minimum term forms',
+  );
+  // Any v5 key requires stated timing, not only a timing key.
+  const unstated = {
+    ...feeComponent('rent', 'rent', undefined),
+    minimumTerm: threeMonths,
+  };
+  refused(
+    advancePlan({ components: [unstated] }),
+    /states it on every component/,
+    'a minimum term with no stated timing',
+  );
+  // A minimum duration that can never fit its pricing window refuses under v5
+  // (a v4 plan keeps parsing: its reviews refuse at rating, as before).
+  const longMinimum = timePlan(
+    { minimumDuration: { period: 'week', count: 2 } },
+    { day: 'd' },
+  );
+  const weekly = { ...longMinimum, pricingWindow: 'week' };
+  assert.equal(BillingPlanSchema.safeParse(weekly).success, true);
+  refused(
+    {
+      ...weekly,
+      components: [{ ...weekly.components[0], timing: { when: 'arrears' } }],
+    },
+    /can never fit its pricing window/,
+    'a two-week minimum in a weekly window',
+  );
+  assert.equal(
+    BillingPlanSchema.safeParse({
+      ...longMinimum,
+      components: [
+        { ...longMinimum.components[0], timing: { when: 'arrears' } },
+      ],
+    }).success,
+    true,
+    'two weeks fit a month window',
+  );
+  // The term selects calculation v5 and its own reader: rung 56 (timing only)
+  // refuses it by name.
+  const termed = advancePlan({ components: [termFee(advance)] });
+  assert.equal(hasBillingPricing(termed), true);
+  assert.equal(hasBillingPricing(advancePlan()), false);
+  assert.deepEqual(billingReleaseTerms([termed]), {
+    agreed: true,
+    calculation: BILLING_TIMING_CALCULATION,
+    floor: BILLING_PRICING_READER,
+  });
+  const payload = {
+    billingPlans: [termed],
+    billingCalculationVersion: BILLING_TIMING_CALCULATION,
+  };
+  assert.equal(
+    billingReleaseMismatch([termed], payload, BILLING_PRICING_READER),
+    false,
+  );
+  assert.equal(
+    billingReleaseMismatch([termed], payload, BILLING_TIMING_READER),
+    true,
+  );
+  assert.equal(
+    billingReleaseMismatch(undefined, {}, BILLING_PRICING_READER),
+    true,
+  );
+});
+
+test('B2 minimum: the early-return term form charges exactly the term too (slice-a correction)', () => {
+  // Ruling 2026-11-28: a minimum term charges exactly the term from the agreed
+  // start, prorated, never more. Slice a billed September whole (1110.00)
+  // because the held service end opened it on the open-ended agreed interval.
+  // A cycle that opens after the return is rated on the committed interval.
+  const planInput = advancePlan({ source: 'use' }) as {
+    bindings: { arrearsSource: Record<string, unknown> };
+  };
+  const earlyReturn = { bill: 'actualEnd', minimumTerm: threeMonths } as const;
+  planInput.bindings.arrearsSource.earlyReturn = earlyReturn;
+  const plan = compileRatePlan(planInput).plan;
+  const review = (asOf: string) =>
+    reviewLines(
+      reviewArrearsCharges(
+        plan,
+        { ...e1Evidence(planInput, asOf), bands: [] },
+        {
+          snapshot: e1Snapshot(e1Return, asOf),
+          subjectId: subject,
+          owner,
+          earlyReturn,
+        },
+      ),
+    );
+  // Same facts as E1m: 210 + 300 + 300 + 90 = 900.00 once the term has run.
+  assert.deepEqual(review('2027-09-15T06:00:00.000Z'), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '30000'],
+    ['rent', september, '9000'],
+  ]);
+  // This form keeps its timing: held cycles fall due as they open.
+  assert.deepEqual(review('2027-07-12T19:00:00.000Z'), [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+  ]);
 });

@@ -154,7 +154,10 @@ export function renderReleaseDiff(input: {
         terms =
           fee.kind === 'oneOff'
             ? `One charge from “${c.amount}” at ${fee.at}.`
-            : `Charge “${c.amount}” ${billingScheduleText(fee.cadence)}. Proration ${fee.feeProration}, pause policy ${fee.fixedFeeDuringPause}.`;
+            : `Charge “${c.amount}” ${billingScheduleText(fee.cadence)}. Proration ${fee.feeProration}, pause policy ${fee.fixedFeeDuringPause}.` +
+              (c.minimumTerm
+                ? ` Minimum term ${c.minimumTerm.count} ${c.minimumTerm.period} from the agreed start.`
+                : '');
       } else {
         const basis = c.allowanceBasis;
         const allowance =
@@ -171,7 +174,7 @@ export function renderReleaseDiff(input: {
     }
     for (const slot of plan.slots)
       lines.push(
-        `Publish “${slot.id}” in ${slot.kind === 'money' ? slot.currency : slot.unit} with up to ${slot.scale} decimal places.`,
+        `Publish “${slot.id}” in ${slot.kind === 'money' ? slot.currency : slot.kind === 'quantity' ? slot.unit : 'percent'} with up to ${slot.scale} decimal places.`,
       );
   }
   for (const plan of from.billingPlans ?? [])

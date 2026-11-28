@@ -114,3 +114,52 @@ export function openedOccurrences(
     (o) => o.start <= asOf && (serviceEnd === null || o.start < serviceEnd),
   );
 }
+
+/** The end of a term counted in periods from the service anchor, on the same
+ * civil calendar as the pricing windows (months clamp from the original day;
+ * a day is one local day at the anchor's wall time). */
+export function termEnd(
+  calendar: BillingCalendar,
+  term: { period: BillingPeriod; count: number },
+) {
+  if (term.period === 'hour') return calendar.start + term.count * hourMs;
+  return term.period === 'month'
+    ? calendar.resolve(monthShift(calendar.wallAnchor, term.count))
+    : calendar.day(term.count * periodDays(term.period, 0));
+}
+
+/** A fixed fee's minimum term (calculation v5) once it binds: the service
+ * ended before the term elapsed, and the ending is visible at `horizon`. The
+ * fee for [service end, term end) is then owed. */
+export function bindingTerm(
+  calendar: BillingCalendar,
+  term: { period: BillingPeriod; count: number } | undefined,
+  serviceEnd: number | null,
+  horizon: number,
+) {
+  if (!term || serviceEnd === null || serviceEnd > horizon) return null;
+  const end = termEnd(calendar, term);
+  return end > serviceEnd ? { start: serviceEnd, end } : null;
+}
+
+/** The advance cycles a fee owes at `asOf`: its opened cycles and, once a
+ * minimum term binds, every cycle that starts from the service end up to the
+ * term end (the last one ends at the term end). Natural occurrence identities:
+ * each cycle appears once. */
+export function owedAdvanceOccurrences(
+  calendar: BillingCalendar,
+  cadence: Exclude<BillingSchedule, { kind: 'onServiceEnd' }>,
+  term: { period: BillingPeriod; count: number } | undefined,
+  asOf: number,
+  serviceEnd: number | null,
+) {
+  const opened = openedOccurrences(calendar, cadence, asOf, serviceEnd).map(
+    (o) => ({ ...o, term: false }),
+  );
+  const binding = bindingTerm(calendar, term, serviceEnd, asOf);
+  if (!binding) return { owed: opened, binding };
+  const held = occurrences(calendar, cadence, binding.end, null)
+    .filter((o) => o.start >= binding.start)
+    .map((o) => ({ ...o, term: true }));
+  return { owed: [...opened, ...held], binding };
+}
