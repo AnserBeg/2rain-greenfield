@@ -308,7 +308,32 @@ jobs:
         # 30-minute limit: a margin, not a bound. See docs/execution/packets/CI-7.md.
         # TRAIN-Q (owner approved): shard 12 holds report-analysis and
         # workflow-record-created (about 825 s), which fit in no other shard.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        # CI-10: runners now often run about 2 times slower, so shards 1-16 are
+        # estimated at most 650 s each and the four files over 650 s alone run in
+        # shards 17-20 of their own (test/helpers/postgres-shard-estimates.json).
+        shard:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+          ]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -369,6 +394,30 @@ jobs:
       - name: Run PostgreSQL shard 12
         if: matrix.shard == 12
         run: corepack pnpm test:postgres:12
+      - name: Run PostgreSQL shard 13
+        if: matrix.shard == 13
+        run: corepack pnpm test:postgres:13
+      - name: Run PostgreSQL shard 14
+        if: matrix.shard == 14
+        run: corepack pnpm test:postgres:14
+      - name: Run PostgreSQL shard 15
+        if: matrix.shard == 15
+        run: corepack pnpm test:postgres:15
+      - name: Run PostgreSQL shard 16
+        if: matrix.shard == 16
+        run: corepack pnpm test:postgres:16
+      - name: Run PostgreSQL shard 17
+        if: matrix.shard == 17
+        run: corepack pnpm test:postgres:17
+      - name: Run PostgreSQL shard 18
+        if: matrix.shard == 18
+        run: corepack pnpm test:postgres:18
+      - name: Run PostgreSQL shard 19
+        if: matrix.shard == 19
+        run: corepack pnpm test:postgres:19
+      - name: Run PostgreSQL shard 20
+        if: matrix.shard == 20
+        run: corepack pnpm test:postgres:20
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale

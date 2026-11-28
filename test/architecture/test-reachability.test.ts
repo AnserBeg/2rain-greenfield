@@ -457,6 +457,12 @@ test('aggregator fails closed on incomplete or invalid evidence', () => {
   }
 });
 
+// CI-10: the general shards are the producers named postgres-<n>, numbered
+// 1..N without a gap, so a shard added or removed there is measured here.
+const postgresShardIds = reachabilityProducers
+  .map(({ id }) => id)
+  .filter((id) => /^postgres-\d+$/u.test(id));
+
 test('declared unfiltered producers are wired to CI and their evidence paths', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const rootScripts = loadScripts('package.json');
@@ -470,7 +476,15 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
     let job = extractWorkflowJob(workflow, producer.ciJob);
     if (producer.ciJob === 'postgres') {
       const shard = producer.id.slice('postgres-'.length);
-      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12\]/u);
+      assert.deepEqual(
+        /^ {8}shard:\s*\[([^\]]*)\]/mu
+          .exec(job)?.[1]
+          ?.split(',')
+          .map((entry) => entry.trim())
+          .filter((entry) => entry !== ''),
+        postgresShardIds.map((id) => id.slice('postgres-'.length)),
+        'the PostgreSQL matrix lists exactly the general shard producers',
+      );
       assert.ok(
         job.includes(
           `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
@@ -536,10 +550,6 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
   }
 });
 
-const postgresShardIds = Array.from(
-  { length: 12 },
-  (_, index) => `postgres-${String(index + 1)}`,
-);
 const postgresShardEstimates = JSON.parse(
   readFileSync('test/helpers/postgres-shard-estimates.json', 'utf8'),
 ) as ShardEstimates;
@@ -559,6 +569,17 @@ function postgresShardLayout(): Map<string, string[]> {
   return layout;
 }
 
+test('the general PostgreSQL shards are numbered 1..N without a gap', () => {
+  assert.ok(postgresShardIds.length >= 20);
+  assert.deepEqual(
+    postgresShardIds,
+    Array.from(
+      { length: postgresShardIds.length },
+      (_, index) => `postgres-${String(index + 1)}`,
+    ),
+  );
+});
+
 test('no general PostgreSQL shard is estimated over its time budget', () => {
   const layout = postgresShardLayout();
   assert.ok(
@@ -575,7 +596,7 @@ test('no general PostgreSQL shard is estimated over its time budget', () => {
   assert.deepEqual(
     unrecorded,
     [],
-    'a file in shards 1-12 has no recorded estimate in test/helpers/postgres-shard-estimates.json',
+    'a file in a general shard has no recorded estimate in test/helpers/postgres-shard-estimates.json',
   );
   const stale = Object.keys(postgresShardEstimates.files).filter(
     (file) => !placed.has(file),
@@ -595,6 +616,7 @@ test('a shard whose recorded estimates sum past the budget is refused by name', 
   ]);
   const refusals = shardsOverBudget(overloaded, {
     budgetSeconds: 100,
+    singleFileShardCeilingSeconds: 1000,
     unrecordedFileSeconds: 90,
     files: { 'test/postgres/a.test.ts': 60, 'test/postgres/b.test.ts': 50 },
   });
@@ -607,6 +629,7 @@ test('a shard whose recorded estimates sum past the budget is refused by name', 
   assert.equal(
     estimateShards(overloaded, {
       budgetSeconds: 100,
+      singleFileShardCeilingSeconds: 1000,
       unrecordedFileSeconds: 90,
       files: {},
     })[1]?.seconds,
@@ -614,26 +637,48 @@ test('a shard whose recorded estimates sum past the budget is refused by name', 
   );
 });
 
+test('a one-file shard is held to the single-file ceiling, not the budget', () => {
+  const layout = new Map([
+    ['postgres-alone', ['test/postgres/heavy.test.ts']],
+    ['postgres-huge', ['test/postgres/huge.test.ts']],
+    ['postgres-empty', [] as string[]],
+  ]);
+  const refusals = shardsOverBudget(layout, {
+    budgetSeconds: 100,
+    singleFileShardCeilingSeconds: 300,
+    unrecordedFileSeconds: 90,
+    files: {
+      'test/postgres/heavy.test.ts': 250,
+      'test/postgres/huge.test.ts': 301,
+    },
+  });
+  assert.equal(
+    refusals.length,
+    1,
+    'only the shard over the ceiling is refused',
+  );
+  assert.throws(
+    () =>
+      shardsOverBudget(layout, {
+        budgetSeconds: 100,
+        unrecordedFileSeconds: 90,
+        files: {},
+      } as unknown as ShardEstimates),
+    /A shard time bound is not a number: undefined/u,
+  );
+  assert.match(
+    refusals[0] ?? '',
+    /^postgres-huge is estimated at 301 s, over the 100 s budget and the 300 s single-file ceiling/u,
+  );
+});
+
 test('every file selected by the former general PostgreSQL glob belongs to exactly one shard', () => {
   const oldGeneralGlob =
     'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|open-items|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts';
-  const shards = [
-    'postgres-1',
-    'postgres-2',
-    'postgres-3',
-    'postgres-4',
-    'postgres-5',
-    'postgres-6',
-    'postgres-7',
-    'postgres-8',
-    'postgres-9',
-    'postgres-10',
-    'postgres-11',
-    'postgres-12',
-  ].map(getReachabilityProducer);
+  const shards = postgresShardIds.map(getReachabilityProducer);
   const files = globSync(oldGeneralGlob);
   assert.ok(files.length > 0);
-  // These paths share basenames with root files assigned to shards 1 and 2.
+  // These paths share basenames with root files assigned to named shards.
   files.push(
     'test/postgres/region/locations.test.ts',
     'test/postgres/region/subregion/releases.test.ts',
