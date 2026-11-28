@@ -428,25 +428,17 @@
     {
       "name": "ledger-company-calendar",
       "claim": "An instant is dated by the company business calendar, never its UTC date.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
-      "original": "RETURN north_star_internal.inventory_business_period(t, instant); END $$;",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "RETURN north_star_internal.business_day(t, e, company, instant); END $$;",
       "replacement": "RETURN (instant AT TIME ZONE 'UTC')::date; END $$$$;",
       "test": {
-        "files": [
-          "test/postgres/ledger-journal-core.test.ts",
-          "test/architecture/ledger-journal-core.test.ts"
-        ]
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
       "kills": [
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "an instant is dated by the company calendar, not the UTC date",
           "expected": "Missing expected rejection: an instant was dated by its UTC date into closed books"
-        },
-        {
-          "file": "test/architecture/ledger-journal-core.test.ts",
-          "name": "accounting dates come only from the company business-day resolver",
-          "expected": "the resolver converts by itself"
         }
       ]
     },
