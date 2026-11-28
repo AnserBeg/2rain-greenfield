@@ -193,10 +193,10 @@ CREATE TABLE platform.ledger_chart_starter_accounts (
   PRIMARY KEY (starter_id, starter_version, account_code)
 );
 -- The Canadian starter, version 1 (owner N2): GST everywhere in Canada, PST for
--- BC and SK, RST for MB. Two ratified roles have no starter row: inventory_asset
--- (no inventory value in v1, owner ruling) and customer_credit (a customer
--- control role that manual lines refuse; its account arrives with the first
--- slice that posts customer credits, 1b). The operator adds either with
+-- BC and SK, RST for MB. Two ratified roles have no starter row, because the
+-- module name-law guard refuses their IDs in a new migration: inventory_asset
+-- (the first-party word) and customer_credit (a first-party entity name). No
+-- ruling excludes either role from v1. The operator adds either with
 -- putAccount.
 INSERT INTO platform.ledger_chart_starter_accounts (starter_id, starter_version, account_code, kind_role_id, default_label, jurisdiction) VALUES
   ('northstar.ledger:starter.canada', 1, '1000', 'northstar.ledger:role.cash', 'Cash on hand', 'CA'),
