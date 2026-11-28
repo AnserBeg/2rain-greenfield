@@ -1,7 +1,4 @@
-import {
-  LINE_TOTALS_OPERATION_READER,
-  ROLLUP_QUERY_READER,
-} from '../../canonical-model/src/line-totals.js';
+import { ROLLUP_QUERY_READER } from '../../canonical-model/src/line-totals.js';
 import { OPEN_ITEM_OPERATION_READER } from '../../canonical-model/src/open-item.js';
 import { CONNECTOR_FAMILY } from '@north-star/canonical-model';
 import {

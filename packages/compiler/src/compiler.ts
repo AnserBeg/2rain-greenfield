@@ -2457,14 +2457,14 @@ function verifyCompleteness(
     (declaresOpenItems(packageRevision)
       ? operationFloor !== OPEN_ITEM_OPERATION_READER
       : lineTotalsRaiseOperationFloor(packageRevision)
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : hasRecordTemplateBinding(packageRevision)
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : hasBookingOperations(packageRevision)
-          ? operationFloor !== bookingReaderFloor(packageRevision)
-          : declaredRules &&
-            operationFloor !==
-              requiredFormulaValidationOperationReader(declaredRules)) ||
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : hasRecordTemplateBinding(packageRevision)
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : hasBookingOperations(packageRevision)
+            ? operationFloor !== bookingReaderFloor(packageRevision)
+            : declaredRules &&
+              operationFloor !==
+                requiredFormulaValidationOperationReader(declaredRules)) ||
     // The query floor is the highest catalog feature present, so a lower
     // feature's floor is exact only when no higher feature rides the catalog.
     (lineTotalsOf(packageRevision).rollups.size > 0

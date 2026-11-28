@@ -1268,14 +1268,15 @@ function verifyFormulaProjectionReference(
     (openItems
       ? operationFloor !== OPEN_ITEM_OPERATION_READER
       : lineTotals.operation
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : hasRecordTemplateBinding(normalized)
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : hasBookingOperations(normalized)
-          ? operationFloor !== bookingReaderFloor(normalized)
-          : rules.length
-            ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-            : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : hasRecordTemplateBinding(normalized)
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : hasBookingOperations(normalized)
+            ? operationFloor !== bookingReaderFloor(normalized)
+            : rules.length
+              ? operationFloor !==
+                requiredFormulaValidationOperationReader(rules)
+              : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
     (lineTotals.query
       ? queryFloor !== ROLLUP_QUERY_READER

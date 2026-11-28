@@ -1086,12 +1086,12 @@ function definitionFromSnapshotRows(
     openItems
       ? operationFloor !== OPEN_ITEM_OPERATION_READER
       : lineTotals.operation
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : templates
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : booking
-          ? operationFloor !== expectedBookingFloor
-          : operationFloor >= BOOKING_OPERATION_READER
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : templates
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : booking
+            ? operationFloor !== expectedBookingFloor
+            : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
