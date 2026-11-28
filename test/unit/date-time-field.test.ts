@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
-import { resolve } from 'node:path';
+import {
+  acknowledgementForBase,
+  readReportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
 import test from 'node:test';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   DATE_TIME_FIELD_READER,
   canonicalZone,
@@ -16,17 +17,13 @@ import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/protocol.js';
 import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
-const authoredPath = resolve('apps/web/release/app.authored.json');
 const base = readReportsPredecessor(
   'apps/web/release/app.authored.json',
 ) as Record<string, unknown>;
 const tip = parseCompiledApplication(
   readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
-const acknowledgement = readUnboundPermissionAcknowledgementFor(
-  authoredPath,
-  'northstar.app:package.application',
-);
+const acknowledgement = acknowledgementForBase(base);
 const NS = 'northstar.app';
 const equipment = `${NS}:entity.custom_equipment`;
 const recordType = {

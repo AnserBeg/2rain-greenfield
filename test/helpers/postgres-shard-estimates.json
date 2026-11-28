@@ -34,6 +34,7 @@
     "test/postgres/document-attachments.test.ts": 321,
     "test/postgres/document-numbering.test.ts": 95,
     "test/postgres/document-templates.test.ts": 349,
+    "test/postgres/ledger-books-by-hand.test.ts": 45,
     "test/postgres/ledger-journal-core.test.ts": 7,
     "test/postgres/line-logical-fields.test.ts": 230,
     "test/postgres/location-runtime.test.ts": 11,

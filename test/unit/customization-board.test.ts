@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
+import {
+  acknowledgementForBase,
+  readReportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
 import test from 'node:test';
 import * as customization from '../../packages/customization/src/index.js';
 import {
@@ -11,7 +14,6 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import {
@@ -30,10 +32,7 @@ const authored: Json = readReportsPredecessor(file);
 const tip = parseCompiledApplication(
   readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
-const acknowledgement = readUnboundPermissionAcknowledgementFor(
-  file,
-  'northstar.app:package.application',
-);
+const acknowledgement = acknowledgementForBase(authored);
 const id = (s: string) => 'northstar.app:' + s;
 const patch = (input: unknown) =>
   customization.CustomizationPatchSchema.parse(input);

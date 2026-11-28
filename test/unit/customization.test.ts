@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import type pg from 'pg';
 import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
+import { acknowledgementForBase } from '../helpers/reports-preceding-release.js';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import {
   declaredListArguments,
@@ -685,7 +686,12 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
 
 function surfaceCompatibilityRequest(chain: readonly CustomizationPatch[]) {
   const { authored: base, release } = applicationBeforeStockCountWorkflow();
-  return { acknowledgement, base, chain, tip: release.application };
+  return {
+    acknowledgement: acknowledgementForBase(base),
+    base,
+    chain,
+    tip: release.application,
+  };
 }
 
 test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
@@ -2543,7 +2549,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
           normalizationProfileVersion: normalized.normalizationProfileVersion,
         },
       },
-      acknowledgement,
+      acknowledgementForBase(compatibility.authored),
     );
     assert.ok(result.status === 'compiled', JSON.stringify(result.diagnostics));
     return {
@@ -2587,7 +2593,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
   const source = original.steps.at(-1)!.release;
   const replay = (next: typeof compatible) =>
     compileInSandbox({
-      acknowledgement,
+      acknowledgement: acknowledgementForBase(compatibility.authored),
       base: next.base,
       chain,
       tip: source,

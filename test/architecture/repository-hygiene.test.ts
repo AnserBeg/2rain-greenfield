@@ -250,6 +250,7 @@ const suiteDefinitions = [
       'test/postgres/document-attachments.test.ts',
       'test/postgres/document-numbering.test.ts',
       'test/postgres/document-templates.test.ts',
+      'test/postgres/ledger-books-by-hand.test.ts',
       'test/postgres/ledger-journal-core.test.ts',
       'test/postgres/line-logical-fields.test.ts',
       'test/postgres/location-runtime.test.ts',

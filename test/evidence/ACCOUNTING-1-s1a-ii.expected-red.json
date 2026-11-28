@@ -1,0 +1,907 @@
+{
+  "version": 1,
+  "packet": "ACCOUNTING-1-s1a-ii",
+  "entries": [
+    {
+      "name": "ledger-balanced-definer",
+      "claim": "The deferred balance check runs as its owner, so a write committed as the runtime role is not refused at COMMIT (review R5).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;",
+      "replacement": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY INVOKER SET search_path = pg_catalog, pg_temp;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer call committed as the runtime role passes the deferred balance check",
+          "expected": "a runtime-originated entry was refused at commit: permission denied"
+        }
+      ]
+    },
+    {
+      "name": "ledger-instant-offset",
+      "claim": "An instant without Z or a numeric offset is refused, never read in the session time zone (review R2).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
+      "replacement": "IF false AND date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an instant without Z or a numeric offset is refused",
+          "expected": "Missing expected rejection: an instant without an offset was read in the session time zone"
+        }
+      ]
+    },
+    {
+      "name": "ledger-date-pin-cast",
+      "claim": "The structural date pin catches CAST(x AS date) outside the resolver (review R3).",
+      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
+      "replacement": "RETURN CAST(civil AS date); END $$$$;",
+      "test": {
+        "files": ["test/architecture/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "accounting dates come only from the company business-day resolver",
+          "expected": "ledger SQL outside the resolver contains a CAST to date"
+        }
+      ]
+    },
+    {
+      "name": "ledger-date-pin-call",
+      "claim": "The structural date pin catches date(x) outside the resolver (review R3).",
+      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
+      "replacement": "RETURN date(civil); END $$$$;",
+      "test": {
+        "files": ["test/architecture/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "accounting dates come only from the company business-day resolver",
+          "expected": "ledger SQL outside the resolver contains a call of the date function"
+        }
+      ]
+    },
+    {
+      "name": "ledger-entry-tripwire",
+      "claim": "A second writer call in one transaction refuses by name instead of risking the R4 deadlock.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
+      "replacement": "IF false AND current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a second writer call in one transaction refuses by name (R4 tripwire)",
+          "expected": "a second writer call in one transaction was not refused by name"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "the R4 tripwire outlives the writer SET clause and clears on savepoint rollback",
+          "expected": "Missing expected rejection: a second writer call in one transaction was admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-line-read-lock",
+      "claim": "The writer's per-line account read holds the account FOR SHARE, so a deactivation cannot commit under it (review R6).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n      FOR SHARE OF a;",
+      "replacement": ";",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an account created while a writer waits is held by its line read (R6)",
+          "expected": "a deactivation committed under an uncommitted writer's line: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-books-start-locked",
+      "claim": "Books start never moves once the company has an entry.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
+      "replacement": "IF false AND EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "books start never moves once the company has an entry",
+          "expected": "Missing expected rejection: books start moved after an entry was posted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-input",
+      "claim": "An apply consumes only the grant attested for its exact input.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.input IS DISTINCT FROM input THEN",
+      "replacement": " THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an attested request applies, and only the exact request it was attested for",
+          "expected": "an apply ran on a grant attested for another input: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-spent",
+      "claim": "An attested grant is consumed once.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF g.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.approvalSpent'; END IF;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an attested grant is consumed once",
+          "expected": "a consumed grant applied again"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-company-scope",
+      "claim": "A company-scoped principal is refused on another company of the same tenant.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company)",
+      "replacement": "AND true",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a principal scoped to one company is refused on another company of the tenant",
+          "expected": "a principal scoped to company A started company B's books: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-company-master",
+      "claim": "A company is a live record of the released legal-entity master (behind it, a company that is not one has no stored revision, so the revision check refuses too).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "  IF revision IS NULL THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;",
+      "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$$$;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a company must be a live record of the released legal-entity master",
+          "expected": "an unscoped member started books for a company that does not exist: ledger.staleRevision"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-write-permission",
+      "claim": "A books change needs the write permission, never a read.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
+      "replacement": "IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_read', 'northstar.ledger:capability.journal'))",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a books change",
+          "expected": "a journal reader started books: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-fence",
+      "claim": "A grant attested under an earlier release fence never applies.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "WHERE (p.tenant_id, p.environment_id, p.release_id, p.fence) = (tenant, environment, released, expected_fence) FOR SHARE;",
+      "replacement": "WHERE (p.tenant_id, p.environment_id, p.release_id) = (tenant, environment, released) FOR SHARE;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested under an earlier release fence never applies",
+          "expected": "a grant applied under a moved release fence: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-prior",
+      "claim": "Books start replaces only the value the person expected.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF to_char(prior, 'YYYY-MM-DD') IS DISTINCT FROM nullif(args->>'expectedPrior', '') THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "books start replaces only the value the person expected",
+          "expected": "books start replaced a value the person did not see: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-execute",
+      "claim": "Only the issuer attests and only north_star_runtime applies; no one runs the internal functions.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;\n",
+      "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text) TO north_star_runtime;\n",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only the issuer attests and only north_star_runtime applies",
+          "expected": "a ledger operation function is executable beyond its grant"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-receipt",
+      "claim": "A consumed grant never commits without a trust receipt that names its facts.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    RAISE EXCEPTION 'ledger.receiptUnverified'; END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a consumed grant never commits without its trust receipt",
+          "expected": "a consumed grant committed with no trust receipt: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another operation never verifies the grant",
+          "expected": "a receipt of another operation verified the grant: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another channel never verifies the grant",
+          "expected": "a receipt of another channel verified the grant: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another approving human never verifies the grant",
+          "expected": "a receipt of another approving human verified the grant: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another company record never verifies the grant",
+          "expected": "a receipt of another company record verified the grant: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a consumed account-put grant never commits without its trust receipt",
+          "expected": "a consumed account-put grant committed with no trust receipt: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a consumed chart-setup grant never commits without its trust receipt",
+          "expected": "a consumed chart-setup grant committed with no trust receipt: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-principal",
+      "claim": "An apply consumes only a grant attested for its own principal (trust read amendment 3).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.principal_id IS DISTINCT FROM nullif(current_setting('north_star.principal_id', true), '')::uuid",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another principal never applies",
+          "expected": "a grant attested for another principal applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-operation",
+      "claim": "An apply consumes only a grant attested for its own operation (trust read amendment 3).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.operation_id IS DISTINCT FROM operation",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another operation never applies",
+          "expected": "a grant attested for another operation applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-request-key",
+      "claim": "An apply consumes only a grant attested for its own request key (trust read amendment 3).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.request_key IS DISTINCT FROM request_key",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another request key never applies",
+          "expected": "a grant attested for another request key applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-channel",
+      "claim": "An apply consumes only a grant attested for its own channel (trust read amendment 3).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.channel IS DISTINCT FROM channel",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another channel never applies",
+          "expected": "a grant attested for another channel applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-release",
+      "claim": "An apply consumes only a grant attested for its own release (trust read amendment 3).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.release_id IS DISTINCT FROM released",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another release never applies",
+          "expected": "a grant attested for another release applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-capability",
+      "claim": "Each apply consumes under its own capability constant, so a grant attested for one ledger capability never applies in another (trust read amendment 4).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n     OR g.capability_id IS DISTINCT FROM capability",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in books start",
+          "expected": "books start consumed a grant attested for the post: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in an account put",
+          "expected": "an account put consumed a grant attested for books start: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in a chart setup",
+          "expected": "a chart setup consumed a grant attested for account put: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-grant-expiry",
+      "claim": "An unconsumed grant is refused 15 minutes after its attestation (trust read amendment 5).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF g.attested_at < clock_timestamp() - interval '15 minutes' THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an unconsumed grant expires 15 minutes after its attestation",
+          "expected": "a grant attested 16 minutes ago applied: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-revision",
+      "claim": "The person's expectedRevision is compared with the company record under its FOR SHARE (trust read amendment 6).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF stored IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a confirmation against another company revision never applies",
+          "expected": "books start applied against a company revision it was not confirmed on: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-policy",
+      "claim": "The apply refuses unless the gateway decided under the policy epoch it holds locked (trust read amendment 7).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || locked THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a decision under a policy version that has since moved never applies",
+          "expected": "books start applied under a policy version that had moved: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-receipt-action",
+      "claim": "The receipt check at commit refuses a trust receipt of another operation than the grant's (trust read amendment 2).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n        AND i.action_id = NEW.operation_id",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another operation never verifies the grant",
+          "expected": "a receipt of another operation verified the grant: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-receipt-channel",
+      "claim": "The receipt check at commit refuses a trust receipt of another channel than the grant's (trust read amendment 2).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n        AND i.channel = NEW.channel",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another channel never verifies the grant",
+          "expected": "a receipt of another channel verified the grant: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-receipt-human",
+      "claim": "The receipt check at commit refuses a trust receipt of another approving human than the grant's (trust read amendment 2).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n        AND NEW.human_id = coalesce(i.approving_human_id,\n              CASE WHEN i.execution_principal_kind = 'HUMAN' THEN i.execution_principal_id END)",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another approving human never verifies the grant",
+          "expected": "a receipt of another approving human verified the grant: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-receipt-record",
+      "claim": "The receipt check at commit refuses a trust receipt of another company record than the grant's (trust read amendment 2).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "\n        AND d.record_id = NEW.input->>'recordId') THEN",
+      "replacement": ") THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a receipt of another company record never verifies the grant",
+          "expected": "a receipt of another company record verified the grant: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-engine-grant",
+      "claim": "A role granted an operation that reaches a ledger capability receives that capability's engine grants in the same pass (trust read amendment 1).",
+      "file": "packages/postgres-provider/src/capability-operation-executor-factory.ts",
+      "original": "      if (!heldIds.has(grant.permissionId)) owed.set(grant.permissionId, grant);",
+      "replacement": "      if (false) owed.set(grant.permissionId, grant);",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted books start receives the ledger permission it needs, and books start commits with its evidence",
+          "expected": "books start through the gateway was refused: ledger.unavailable"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted account put receives the ledger permission it needs, and an account put commits with its evidence",
+          "expected": "an account put through the gateway was refused: ledger.unavailable"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted chart setup receives the ledger permission it needs, and a chart setup commits with its evidence",
+          "expected": "a chart setup through the gateway was refused: ledger.unavailable"
+        }
+      ]
+    },
+    {
+      "name": "ledger-evidence-old-value",
+      "claim": "The change document records the value an apply replaced, as the apply returned it (trust read amendment 7).",
+      "file": "packages/postgres-provider/src/ledger-capability-executor.ts",
+      "original": "oldState: factState(change.old),",
+      "replacement": "oldState: factState(null),",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted books start receives the ledger permission it needs, and books start commits with its evidence",
+          "expected": "the change document did not record the books start it replaced"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-permission",
+      "claim": "The books-start operation permission alone never starts books: the ledger checks its own grant (delta read amendment 10, first direction).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
+      "replacement": "IF false AND NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "the books-start permission without the ledger grant is refused by the ledger",
+          "expected": "a role without the ledger grant started books: succeeded"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a principal scoped to one company is refused on another company of the tenant",
+          "expected": "a principal scoped to company A started company B's books: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a books change",
+          "expected": "a journal reader started books: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-capability",
+      "claim": "The account put consumes under its own capability constant, never the grant's: a grant attested for books start never applies in it (skeleton check note a).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_account_put',",
+      "replacement": "invocation := north_star_internal.ledger_consume_grant(grant_key, (SELECT g.capability_id FROM platform.ledger_approval_grants g WHERE g.grant_id = grant_key),",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in an account put",
+          "expected": "an account put consumed a grant attested for books start: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-access",
+      "claim": "The account put runs the access checks (fence, ledger permission, live company); without them a journal reader puts an account.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) put_access;",
+      "replacement": "    FROM (SELECT platform.lock_current_policy_epoch(tenant, environment) AS policy_epoch, north_star_internal.ledger_company_live(company, true) AS revision) put_access;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-revision",
+      "claim": "The account put compares the person's expectedRevision with the company record under its FOR SHARE.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF put_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put against another company revision never applies",
+          "expected": "an account put applied against a company revision it was not confirmed on: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-policy",
+      "claim": "The account put refuses unless the gateway decided under the policy epoch it holds locked.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || put_epoch THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put decided under a policy version that has since moved never applies",
+          "expected": "an account put applied under a policy version that had moved: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-prior",
+      "claim": "The account put replaces only the account facts the person expected, compared under the account row lock.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "  IF (was.label, CASE WHEN was.active",
+      "replacement": "  IF false AND (was.label, CASE WHEN was.active",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put replaces only the account the person expected",
+          "expected": "an account put replaced an account the person did not expect: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-books-started",
+      "claim": "An account put before books start refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;",
+      "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put before books start refuses by name",
+          "expected": "an account put before books start was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-kind",
+      "claim": "An account of a kind that is not a core role refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    RAISE EXCEPTION 'ledger.unknownAccountKind'; END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put of an unknown kind refuses by name",
+          "expected": "an account of an unknown kind was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-execute",
+      "claim": "Only north_star_runtime may execute the account put.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;",
+      "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime, PUBLIC;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only the issuer attests and only north_star_runtime applies",
+          "expected": "a ledger operation function is executable beyond its grant"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-capability",
+      "claim": "The chart setup consumes under its own capability constant, never the grant's: a grant attested for account put never applies in it (skeleton check note a).",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_chart_setup',",
+      "replacement": "invocation := north_star_internal.ledger_consume_grant(grant_key, (SELECT g.capability_id FROM platform.ledger_approval_grants g WHERE g.grant_id = grant_key),",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in a chart setup",
+          "expected": "a chart setup consumed a grant attested for account put: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-access",
+      "claim": "The chart setup runs the access checks (fence, ledger permission, live company); without them a journal reader sets up a chart.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) chart_access;",
+      "replacement": "    FROM (SELECT platform.lock_current_policy_epoch(tenant, environment) AS policy_epoch, north_star_internal.ledger_company_live(company, true) AS revision) chart_access;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-revision",
+      "claim": "The chart setup compares the person's expectedRevision with the company record under its FOR SHARE.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF chart_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup against another company revision never applies",
+          "expected": "a chart setup applied against a company revision it was not confirmed on: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-policy",
+      "claim": "The chart setup refuses unless the gateway decided under the policy epoch it holds locked.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || chart_epoch THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup decided under a policy version that has since moved never applies",
+          "expected": "a chart setup applied under a policy version that had moved: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-code-taken",
+      "claim": "A starter code the company already uses refuses the whole chart by name, never as a raw unique violation.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.chartCodeTaken'; END;",
+      "replacement": "EXCEPTION WHEN unique_violation THEN RAISE; END;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup never overwrites an account: a starter code in use refuses the whole chart",
+          "expected": "a chart setup over an account in use was not refused by name: duplicate key value"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-books-started",
+      "claim": "A chart setup before books start refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.chartBeforeBooksStart'; END IF;",
+      "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.chartBeforeBooksStart'; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup before books start refuses by name",
+          "expected": "a chart setup before books start was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-starter",
+      "claim": "A starter, version and jurisdiction with no rows refuses by name rather than adding nothing.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    RAISE EXCEPTION 'ledger.unknownStarter'; END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an unknown starter or jurisdiction refuses by name",
+          "expected": "an unknown starter was not refused by name: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-execute",
+      "claim": "Only north_star_runtime may execute the chart setup.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;",
+      "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime, PUBLIC;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only the issuer attests and only north_star_runtime applies",
+          "expected": "a ledger operation function is executable beyond its grant"
+        }
+      ]
+    }
+  ]
+}

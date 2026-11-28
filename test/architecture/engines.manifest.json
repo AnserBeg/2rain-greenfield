@@ -127,7 +127,14 @@
     },
     {
       "id": "ledger",
-      "names": ["ledger", "general_ledger", "subledger"],
+      "names": [
+        "ledger",
+        "general_ledger",
+        "subledger",
+        "ledger_books_start",
+        "ledger_account_put",
+        "ledger_chart_setup"
+      ],
       "nameScope": "engines-only",
       "businesses": [
         "distribution",
@@ -135,7 +142,7 @@
         "professional services"
       ],
       "adr": "docs/decisions/ADR-0093-ledger-and-posting-rules.md",
-      "adrNote": "ACCOUNTING-1 s0 landed the ADR only, so the ledger owns no files yet. 'ledger' alone is ordinary English (the stock ledger, ledger styles), so it counts only in ID position (northstar.ledger).",
+      "adrNote": "ACCOUNTING-1 s0 landed the ADR only, so the ledger owns no files yet. Slice 1a-ii adds the local names of its registered capabilities (northstar.ledger:capability.<name>; the post is general_ledger): engine names, not first-party vocabulary. 'ledger' alone is ordinary English (the stock ledger, ledger styles), so it counts only in ID position (northstar.ledger).",
       "files": []
     }
   ]

@@ -86,7 +86,10 @@ import type {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operation-gateway.js';
 import type { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
-import { type PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
+import {
+  capabilityEngineGrants,
+  type PostgresCapabilityOperationExecutorFactory,
+} from './capability-operation-executor-factory.js';
 import { loadMigrations, runMigrations } from './migrations.js';
 import { type ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
 import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
@@ -382,6 +385,7 @@ export async function createComposedApplicationRuntime(
         adminPool,
         identities,
         serving.normalizedDefinitionBytes,
+        options.capabilityOperationExecutorFactories ?? [],
       );
       if (options.localDemoWorkflowApprovals)
         await ensureReleaseApprover(
@@ -1094,12 +1098,24 @@ async function loadActiveTenantCustomization(
 /**
  * The local demo's grants for one release (CUSTOMIZE: a tenant release's new
  * permissions bind to the same full-release roles the first-party ones do).
+ * Each role also receives the engine grants of the capabilities its
+ * operation permissions reach (`capabilityEngineGrants`), in the same pass.
  */
 export async function provisionLocalDemoReleaseAuthorization(
   adminPool: AdminQueryable,
   identities: ScopeIdentities,
   normalizedDefinitionBytes: Uint8Array,
+  capabilityFactories: readonly PostgresCapabilityOperationExecutorFactory[],
 ): Promise<void> {
+  const { operations } = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  const withEngineGrants = (
+    granted: readonly CurrentPolicyPermissionBinding[],
+  ) => [
+    ...granted,
+    ...capabilityEngineGrants(operations, granted, capabilityFactories),
+  ];
   const bindings = [
     ...releasePolicyBindings(normalizedDefinitionBytes, true),
     {
@@ -1112,22 +1128,26 @@ export async function provisionLocalDemoReleaseAuthorization(
   await provisionLocalDemoAuthorization(
     adminPool,
     identities.runtime,
-    bindings.filter(
-      (binding) =>
-        binding !== ADDRESS_CONNECTOR_CONFIGURE_BINDING &&
-        !/:permission\.template_(?:publish|assign|disclose)_/u.test(
-          binding.permissionId,
-        ) &&
-        !binding.permissionId.endsWith(':permission.purchase_order_approve') &&
-        !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
-          binding.permissionId,
-        ),
+    withEngineGrants(
+      bindings.filter(
+        (binding) =>
+          binding !== ADDRESS_CONNECTOR_CONFIGURE_BINDING &&
+          !/:permission\.template_(?:publish|assign|disclose)_/u.test(
+            binding.permissionId,
+          ) &&
+          !binding.permissionId.endsWith(
+            ':permission.purchase_order_approve',
+          ) &&
+          !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
+            binding.permissionId,
+          ),
+      ),
     ),
   );
   await provisionLocalDemoAuthorization(
     adminPool,
     identities.manager,
-    bindings,
+    withEngineGrants(bindings),
     'local-demo-manager',
   );
 }

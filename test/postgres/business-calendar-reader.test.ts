@@ -157,7 +157,11 @@ test('upgrading to the calendar resolver leaves every stored row byte-identical'
       assert.equal((await hold(1, '09:00', '10:00')).state, 'hold');
 
       const before = await digests(admin);
-      const applied = await runMigrations(admin, migrations);
+      // Exactly the calendar migration: later migrations are not this upgrade.
+      const applied = await runMigrations(
+        admin,
+        migrations.slice(0, index + 1),
+      );
       assert.deepEqual(applied.applied, [migrations[index]!.name]);
       assert.deepEqual(
         await digests(admin, [...before.keys()]),

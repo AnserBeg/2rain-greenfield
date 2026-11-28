@@ -19,7 +19,6 @@ import {
   openComposedApplicationRuntime,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   COMPANY_ACCESS_INDEX,
   COMPANY_ACCESS_INDEX_READER,
@@ -45,6 +44,7 @@ import {
 } from '../helpers/postgres.js';
 
 import {
+  acknowledgementForBase,
   reportsPredecessor,
   readReportsPredecessor,
 } from '../helpers/reports-preceding-release.js';
@@ -223,9 +223,8 @@ test(
                 base: readReportsPredecessor(path),
                 chain: [popup, change],
                 tip,
-                acknowledgement: readUnboundPermissionAcknowledgementFor(
-                  path,
-                  'northstar.app:package.application',
+                acknowledgement: acknowledgementForBase(
+                  readReportsPredecessor(path),
                 ),
               });
               assert.ok(reproduced.status === 'compiled');

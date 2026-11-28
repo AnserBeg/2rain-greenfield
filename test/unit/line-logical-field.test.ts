@@ -7,11 +7,12 @@
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
 import test from 'node:test';
 
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  acknowledgementForBase,
+  readReportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
 import {
   CurrencyViaSchema,
   ReportCurrencyBindingSchema,
@@ -40,17 +41,13 @@ import { renderValueControl } from '../../apps/web/src/editor-controls.js';
 import { headerCurrencyFieldIds } from '../../apps/web/src/document-editor.js';
 import type { CompiledLogicalField } from '../../apps/web/src/surface-contract.js';
 
-const authoredPath = resolve('apps/web/release/app.authored.json');
 const base = readReportsPredecessor(
   'apps/web/release/app.authored.json',
 ) as Record<string, unknown>;
 const tip = parseCompiledApplication(
   readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
-const acknowledgement = readUnboundPermissionAcknowledgementFor(
-  authoredPath,
-  'northstar.app:package.application',
-);
+const acknowledgement = acknowledgementForBase(base);
 const NS = 'northstar.app';
 const order = `${NS}:entity.custom_work_order`;
 const lines = `${NS}:entity.custom_work_order_lines`;
