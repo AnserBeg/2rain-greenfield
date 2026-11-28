@@ -1161,6 +1161,24 @@
           "expected": "Billing replay digest mismatch"
         }
       ]
+    },
+    {
+      "name": "billing-timing-service-use-early-return",
+      "claim": "Advance on a service-use source requires a declared early return; without one, cycles after a return would keep opening at the full fee.",
+      "file": "packages/canonical-model/src/billing.ts",
+      "original": "            source === 'bookingActuals' ||\n            (arrears?.kind === 'evidenceQuery' && !arrears.earlyReturn)",
+      "replacement": "            source === 'bookingActuals' &&\n            arrears?.kind === 'evidenceQuery' &&\n            !arrears.earlyReturn",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2: advance on service use requires a declared early return$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2: advance on service use requires a declared early return",
+          "expected": "an evidence source with no early return"
+        }
+      ]
     }
   ]
 }

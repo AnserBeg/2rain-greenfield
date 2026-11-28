@@ -7,7 +7,7 @@ CI tier: pending full
 
 ## Claims
 1. `timing {when: advance | arrears, earlyEnd?: keepPaidPeriod | prorateAndRefund}` on `time` and recurring `fixed` components. Absent = arrears, so v2-v4 bytes, digests and calculations are unchanged (no normalization default). Any timing key selects calculation v5 and reader 55; v5 also rates the v4 rule keys.
-2. No implicit timing under v5 (amendment 4): a plan stating timing on one component states it on every time and recurring fixed component. Refused at parse: advance on a time component (amendment 5), on a meter (strict object) or a one-off; advance with `fixedFeeDuringPause` absent or suspend; `prorateAndRefund`; advance on a periodMeter plan or without an interval or service-use source.
+2. No implicit timing under v5 (amendment 4): a plan stating timing on one component states it on every time and recurring fixed component. Refused at parse: advance on a time component (amendment 5), on a meter (strict object) or a one-off; advance with `fixedFeeDuringPause` absent or suspend; `prorateAndRefund`; `earlyEnd` on an arrears component; advance on a periodMeter plan or without an interval or service-use source; advance on service use without a declared `earlyReturn` (bookingActuals, or evidenceQuery without the rule).
 3. Owed set, defined once (amendment 3): every cadence cycle whose clamped start is <= the review instant and before the service end. A late first review owes every opened cycle; none opens at or after the end (keepPaidPeriod).
 4. Second horizon (amendment 2): each owed cycle is rated over its whole span on the agreed interval (evidence `agreedEnd`, kept by `reviewArrearsCharges` before actual use moves the service end) united with actual use through the review instant. The arrears horizon is unchanged. An advance-only review (no cycle closed) passes the period start as its arrears boundary and rates only advance fees; the review's `cycle` is then null and it carries `advance` (absent on untimed plans, so their review bytes stay).
 5. E1 (CAD 300/month, calendar months, from Jun 10 2027, Edmonton): Jun 10 210.00; Jul 1 +300.00; an agreed end of Aug 20 prorates August to 183.87. Service use, `actualEnd`, returned Jul 12: July stays 300.00 (total 510.00), August never opens, first reviewed Aug 5 or Sep 15 alike. Arrears fees and one-offs in the same plan stay closed-cycle only.
@@ -22,11 +22,17 @@ CI tier: pending full
 - The served path still returns notDue when the review instant is at or before the anchor (the usage window must be non-empty); a review an instant later owes the first cycle.
 - A service-use review that owes advance before any use leg exists refuses (no commercial quantity), as before: fail closed.
 
+## Fix round (Mythos silent-harm review FIX, 2026-11-28)
+1. Money: advance on a service-use source with no earlyReturn kept opening whole cycles after the return (agreed Jun 10 to Aug 31, returned Jul 12: 810.00). Ruled: refuse it at parse (bookingActuals, or evidenceQuery without earlyReturn); ADR-0083 records it. Control timing-service-use-early-return.
+2. `earlyEnd` on an arrears component was admitted and never read: refused, with a test.
+Items 3 (an advance line's period end is the full cycle end when the agreed end is inside it) and 4 (no term pins: a backdated table re-rates an opened cycle) go to s3b.
+The first controls dispatch (46145546481, 12/12 green) had input ref=4f93f588916320dc98dc9483d8c9d77967f4d641. Full 46145541191 was cancelled for the fix (the tip moved), not red.
+
 ## Rules 16, 17
 (a) Advance period rent: rentals, storage, coworking, subscriptions, service contracts. (b) Any recurring fixed fee on any interval or service-use source takes it; the owed set and the agreed horizon are generic. (c) Narrower: fixed fees only; time in advance is slice (e).
 
-## Controls (rule 24; test/evidence/BILLING-1.expected-red.json, 10 new)
-advance-agreed-not-elapsed, advance-keep-paid-period (domain + PG), advance-final-no-rerate, advance-no-cycle-after-end, advance-late-review, advance-arrears-closed-only, timing-unstated, timing-absent-pause, timing-advance-time, timing-version-gate.
+## Controls (rule 24; test/evidence/BILLING-1.expected-red.json, 11 new, 2 s3a-i entries re-pointed)
+advance-agreed-not-elapsed, advance-keep-paid-period (domain + PG), advance-final-no-rerate, advance-no-cycle-after-end, advance-late-review, advance-arrears-closed-only, timing-unstated, timing-absent-pause, timing-advance-time, timing-version-gate, timing-service-use-early-return. Re-pointed: rules-version-selection, early-return-last-return.
 
 ## Test it yourself
 `node --import tsx --test --test-name-pattern='B2' test/integration/billing-rules.test.ts`: E1 on the agreed interval and over service use, the late review, the overrun, the refusals and the v5 gate.

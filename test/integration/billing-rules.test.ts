@@ -1389,6 +1389,20 @@ test('B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside 
       /interval or service-use source/,
       'advance without a cycle source: ' + source,
     );
+  refused(
+    advancePlan({
+      slots: ['rent', 'fuel'],
+      components: [
+        feeComponent('rent', 'rent', advance),
+        feeComponent('fuel', 'fuel', {
+          when: 'arrears',
+          earlyEnd: 'keepPaidPeriod',
+        }),
+      ],
+    }),
+    /early-end rule applies only to an advance component/,
+    'an early-end rule on an arrears component',
+  );
   // A meter declares no timing at all.
   const meterPlan = advancePlan({
     slots: ['rent', 'rate', 'included'],
@@ -1424,6 +1438,36 @@ test('B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside 
     ).success,
     true,
   );
+});
+
+test('B2: advance on service use requires a declared early return', () => {
+  // Without one, service use holds the service open to the agreed end, so
+  // an advance fee would keep opening whole cycles after the return (agreed
+  // Jun 10 to Aug 31, returned Jul 12: August 300.00 with no commitment).
+  const use = advancePlan({ source: 'use' }) as {
+    bindings: { arrearsSource: Record<string, unknown> };
+  };
+  assert.equal(BillingPlanSchema.safeParse(use).success, true);
+  const withoutRule = { ...use.bindings.arrearsSource };
+  delete withoutRule.earlyReturn;
+  for (const [reason, arrearsSource] of [
+    ['an evidence source with no early return', withoutRule],
+    [
+      'the persisted Booking source',
+      { kind: 'bookingActuals', queryId: 'usage', slotId: subject },
+    ],
+  ] as const) {
+    const parsed = BillingPlanSchema.safeParse({
+      ...use,
+      bindings: { ...use.bindings, arrearsSource },
+    });
+    assert.equal(parsed.success, false, reason);
+    assert.match(
+      JSON.stringify(parsed.error?.issues),
+      /requires a declared early return/,
+      reason,
+    );
+  }
 });
 
 test('B2: timing selects calculation v5 and the timing reader; plans without it keep their bytes', () => {

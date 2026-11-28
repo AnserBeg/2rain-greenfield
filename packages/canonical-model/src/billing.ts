@@ -313,7 +313,8 @@ export const BillingPlanSchema = z
     // B2 timing (calculation v5). Only a recurring fixed fee bills in advance
     // in this slice; every other admitted key is rated.
     if (plan.components.some((c) => c.kind !== 'meter' && c.timing)) {
-      const source = plan.bindings?.arrearsSource?.kind;
+      const arrears = plan.bindings?.arrearsSource;
+      const source = arrears?.kind;
       for (const c of plan.components) {
         if (c.kind === 'meter') continue;
         const t = c.timing;
@@ -329,7 +330,13 @@ export const BillingPlanSchema = z
         }
         if (t.earlyEnd === 'prorateAndRefund')
           issue('prorateAndRefund requires customer credit balances');
-        if (t.when !== 'advance') continue;
+        if (t.when !== 'advance') {
+          // keepPaidPeriod governs an opened advance cycle; arrears never
+          // opens one, so the rule would be declared and never read.
+          if (t.earlyEnd !== undefined)
+            issue('An early-end rule applies only to an advance component');
+          continue;
+        }
         if (c.kind === 'time') issue('Advance time billing is not admitted');
         else if (c.occurrence.kind === 'recurring') {
           // Suspending an advance fee during a pause would need a refund.
@@ -337,6 +344,14 @@ export const BillingPlanSchema = z
             issue('An advance fee continues during a pause');
           if (source === undefined || source === 'periodMeter')
             issue('Advance billing requires an interval or service-use source');
+          // Without a declared early return, service use holds the service
+          // open to the agreed end, so cycles after a return would keep
+          // opening at the full fee (no commitment was declared).
+          if (
+            source === 'bookingActuals' ||
+            (arrears?.kind === 'evidenceQuery' && !arrears.earlyReturn)
+          )
+            issue('Advance on service use requires a declared early return');
         }
       }
     }
