@@ -15,7 +15,7 @@ CI tier: pending full
 7. Served end to end: a PG journey reads a v5 service-use plan (`evidenceQuery` + `earlyReturn: actualEnd`, a daily fee in advance) through the released quote query while the equipment is out and after an early return: two opened cycles at 30.00 each, the second kept whole, no third. This is also the first PG journey through the `evidenceQuery` form (s3a-i disclosed gap).
 
 ## Decisions
-- Overrun (not in the note or the read; recorded in ADR-0083 as an unruled choice): actual use past the agreed end is billed on top of agreed coverage, so an overrun cycle grows with the review instant. Agreed-only coverage would have billed 0 for an overrun month.
+- Overrun (not in the note or the read): actual use past the agreed end is billed in addition to agreed coverage, once (a union, so agreed days never count twice); an overrun cycle grows with the review instant. Agreed-only coverage would have billed 0 for an overrun month. Orchestrator ruling (delegated, 2026-11-28) adopts this; recorded in ADR-0083.
 - Amendment 10(b) recorded in the ADR: keepPaidPeriod bills an opened cycle even if no review saw it before the return.
 - Amendment 1: on an agreed-interval source a shortened end is a correction; the ADR says so.
 - Amendment 7: no negative-advance refusal here (s3b gate, with the credit hold on advance Generate).
