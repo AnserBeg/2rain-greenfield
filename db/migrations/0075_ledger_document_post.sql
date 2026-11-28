@@ -94,7 +94,7 @@ LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE catalog jsonb; storage jsonb; BEGIN
   catalog := north_star_internal.ledger_release_projection(released, 'northstar.compiler:projection-family.operation-catalog');
   storage := north_star_internal.ledger_release_projection(released, 'northstar.compiler:projection-family.storage-target');
-  BEGIN
+  <<lookup>> BEGIN
     SELECT o->'documentPosting' INTO STRICT binding FROM jsonb_array_elements(catalog->'operations') o
       WHERE o->>'operationId' = operation AND o->>'lifecycle' = 'active'
         AND o#>>'{effect,kind}' = 'registeredCapabilityEffect'
@@ -214,9 +214,8 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
       WHEN b.binding#>>'{options,credit}' THEN 'C' END;
     IF side IS NULL THEN RAISE EXCEPTION 'ledger.invalidEntry'; END IF;
     lines := lines || jsonb_build_array(jsonb_build_object('accountId', account, 'side', side,
-      'amount', north_star_internal.ledger_minor_units((line->>'amount')::numeric, minor)));
-  END LOOP;
-  BEGIN
+      'amount', north_star_internal.ledger_minor_units((line->>'amount')::numeric, minor))); END LOOP;
+  <<journal>> BEGIN
     entry := north_star_internal.ledger_write_entry(company, 'manual', jsonb_build_object('civil', doc.civil),
       doc.currency, lines, jsonb_build_object('operationReceiptId', invocation, 'entryOrdinal', 1,
         'sourceTypeId', b.header->>'entityId', 'recordId', draft_id, 'sourceHeaderRevision', doc.revision));
