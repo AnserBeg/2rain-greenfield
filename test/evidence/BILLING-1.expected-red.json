@@ -904,10 +904,10 @@
     },
     {
       "name": "billing-early-return-last-return",
-      "claim": "Committed early-return time runs from the last return, not from pickup (120 under agreedEnd, 180 under a one-week minimum).",
-      "file": "packages/domain/src/billing/service-use.ts",
-      "original": "    ? Math.max(...legs.map((r) => Date.parse(r.end!)))",
-      "replacement": "    ? Math.min(...legs.map((r) => Date.parse(r.start)))",
+      "claim": "Committed early-return time runs from the last return to the service end, never the agreed interval in full (120 under agreedEnd, 180 under a one-week minimum, for a day-one pickup).",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n    );",
+      "replacement": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B9: committed time runs from the last return, not from pickup$"
@@ -916,7 +916,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B9: committed time runs from the last return, not from pickup",
-          "expected": "\\+\\s+cents: '18000'"
+          "expected": "\\+\\s+cents: '15000'"
         }
       ]
     },
