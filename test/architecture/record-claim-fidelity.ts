@@ -41,6 +41,7 @@ import { join, relative, resolve, sep } from 'node:path';
 
 import ts from 'typescript';
 import nonExecutablePaths from '../../scripts/non-executable-pathspec.json';
+import { buildModeSwitch } from '../../scripts/build-mode.mjs';
 
 /** Every way this gate can fail. One code, one assertion, one committed control. */
 export const RECORD_CLAIM_CODES = [
@@ -830,7 +831,25 @@ async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
   process.stderr.write(`${text}\n`);
-  return 1;
+  const reportOnly = buildModeSwitch('recordChecksReportOnly', { root });
+  if (reportOnly) {
+    process.stderr.write(
+      'check-records: build mode (build-mode.json recordChecksReportOnly) -- reported, not failing\n',
+    );
+  }
+  return recordClaimExitCode(report, reportOnly);
+}
+
+/**
+ * BUILD-MODE-1, switch `recordChecksReportOnly`: findings are reported, not
+ * failed, before the first tenant. `--self-test` is unaffected: its controls
+ * must still red. With the switch off any finding fails, as before.
+ */
+export function recordClaimExitCode(
+  report: Pick<RecordClaimReport, 'findings'>,
+  reportOnly: boolean,
+): 0 | 1 {
+  return report.findings.length === 0 || reportOnly ? 0 : 1;
 }
 
 // `import.meta` is unavailable under this project's CommonJS emit, so the entry

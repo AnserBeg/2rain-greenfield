@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import console from 'node:console';
 import { git } from '../.github/scripts/ci-selection.mjs';
+import { buildModeSwitch } from './build-mode.mjs';
 
 // Legacy records predate tiers. Resolve the introduction on the current
 // first-parent lineage, so other packets that landed before rollout are legacy.
@@ -47,6 +48,20 @@ const branch = (
   git('rev-parse', '--abbrev-ref', 'HEAD')
 ).trim();
 const pendingAllowed = /^packet\//u.test(branch);
+// BUILD-MODE-1, switch `recordChecksReportOnly`: before the first tenant a
+// record's tier line is reported but does not fail the run. With the switch
+// off (or NORTH_STAR_BUILD_MODE=off) every finding fails, as before.
+const reportOnly = buildModeSwitch('recordChecksReportOnly', {
+  root: git('rev-parse', '--show-toplevel').trim(),
+});
+const report = (message) => {
+  if (reportOnly) {
+    console.error(`WARNING (build mode, not failing): ${message}`);
+    return;
+  }
+  console.error(message);
+  process.exitCode = 1;
+};
 for (const path of readdirSync(directory, { recursive: true }).map((path) =>
   join(directory, path),
 )) {
@@ -64,14 +79,12 @@ for (const path of readdirSync(directory, { recursive: true }).map((path) =>
   }
   const pending = [...body.matchAll(pendingLine)].length;
   if ([...body.matchAll(line)].length + pending !== 1) {
-    console.error(
+    report(
       `${path}: expected one "CI tier: quick|full https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>" line (or "CI tier: pending quick|full" on a packet/* branch)`,
     );
-    process.exitCode = 1;
   } else if (pending === 1 && !pendingAllowed) {
-    console.error(
+    report(
       `${path}: "CI tier: pending" is allowed only on a packet/* branch (this is "${branch}"); replace it with the real run URL: CI tier: <quick|full> https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>`,
     );
-    process.exitCode = 1;
   }
 }

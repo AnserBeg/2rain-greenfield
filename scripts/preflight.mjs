@@ -175,7 +175,7 @@ export function steps(changed) {
       title: 'language-coverage ledger digest and decisions',
       command: [node, ...tsx, 'test/helpers/preflight-language-coverage.ts'],
       remedy:
-        'update test/fixtures/g2/language-conformance/coverage-decisions.json: set ledgerDigest (the document and every decision) to the current digest printed above and observationSnapshot to the fresh one printed above; re-decide any decision whose obligation moved',
+        'update test/fixtures/g2/language-conformance/coverage-decisions.json: set ledgerDigest (the document and every decision) to the current digest printed above and observationSnapshot to the fresh one printed above; re-decide any decision whose obligation moved. In build mode (build-mode.json languageCoverageDigestRegeneration) preflight rewrites the digests itself and fails only on a NEW obligation kind: decide how that kind is covered, then add it to obligationKinds by hand',
     },
     {
       id: 'schema-snapshot',

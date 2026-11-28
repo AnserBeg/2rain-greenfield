@@ -4,7 +4,9 @@
  * It only lowers: each count drops to what the guard observes and a row
  * observed zero times disappears. When any name-law rule is red (a count rose,
  * a new file or name appeared, or an input is malformed) it refuses and writes
- * nothing, so it can never be used to admit new debt. A packet that converts a
+ * nothing, so it can never be used to admit new debt. In build mode
+ * (BUILD-MODE-1) rises are warnings: they keep their allowance and only the
+ * names that fell are lowered. A packet that converts a
  * cluster runs this in the same commit and the diff shows the debt it paid.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -61,7 +63,11 @@ function lower(root: string): number {
     );
     return 1;
   }
-  const after = lowerNameLawBaseline(before, result.nameLaw.observations);
+  const after = lowerNameLawBaseline(
+    before,
+    result.nameLaw.observations,
+    result.warnings.length > 0 ? 'report' : 'enforce',
+  );
   writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
   console.log(
     `guard:lower-baseline: ${String(total(before))} -> ${String(total(after))} uses, ${String(Object.keys(before.files).length)} -> ${String(Object.keys(after.files).length)} files`,

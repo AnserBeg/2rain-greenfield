@@ -2413,3 +2413,147 @@ test('name law: guard:lower-baseline refuses a rise or a moved file and writes n
     removeArchitectureFixture(falling);
   }
 });
+
+// BUILD-MODE-1, switch `nameGuardReportOnly`.
+const buildModeOn = JSON.stringify({
+  enabled: true,
+  switches: { nameGuardReportOnly: true },
+  version: 1,
+});
+
+test('BUILD-MODE-1: build mode reports a name-law rise and a new name as warnings, and nothing else', () => {
+  const files = {
+    'build-mode.json': buildModeOn,
+    [genericFile]:
+      "export const first = 'booking';\nexport const second = 'booking';\nexport const id = 'sales_order';\n",
+  };
+  const baselineFiles = { [genericFile]: nameLawRow({ 'engine:booking': 1 }) };
+  withNameLawFixture(
+    files,
+    (result) => {
+      assert.deepEqual(nameLawViolations(result), []);
+      assert.deepEqual(
+        result.warnings.map((warning) => warning.ruleId).toSorted(),
+        ['PRESS011_FIRST_PARTY_NAME', 'PRESS015_BASELINE_RISE'],
+      );
+      assert.match(formatModulePressLaw(result), /WARNING .*PRESS015/u);
+      // Rises keep their allowance; nothing is raised or added.
+      assert.deepEqual(
+        lowerNameLawBaseline(
+          { files: baselineFiles, measuredOn: 'fixture', version: 1 },
+          result.nameLaw.observations,
+          'report',
+        ).files,
+        baselineFiles,
+      );
+    },
+    baselineFiles,
+  );
+  // The same tree with the switch off (env, or no build-mode.json) is strict.
+  const previous = process.env.NORTH_STAR_BUILD_MODE;
+  process.env.NORTH_STAR_BUILD_MODE = 'off';
+  try {
+    withNameLawFixture(
+      files,
+      (result) => {
+        assert.deepEqual(result.warnings, []);
+        assert.deepEqual(
+          nameLawViolations(result)
+            .map((violation) => violation.ruleId)
+            .toSorted(),
+          ['PRESS011_FIRST_PARTY_NAME', 'PRESS015_BASELINE_RISE'],
+        );
+      },
+      baselineFiles,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.NORTH_STAR_BUILD_MODE;
+    else process.env.NORTH_STAR_BUILD_MODE = previous;
+  }
+  withNameLawFixture(
+    { [genericFile]: files[genericFile] },
+    (result) => {
+      assert.deepEqual(result.warnings, []);
+      assert.equal(nameLawViolations(result).length, 2);
+    },
+    baselineFiles,
+  );
+});
+
+test('BUILD-MODE-1: build mode never reports away a malformed input or a changed frozen migration', () => {
+  withNameLawFixture(
+    { 'build-mode.json': buildModeOn, [appliedMigration]: 'SELECT 2;\n' },
+    (result) => {
+      assert.deepEqual(result.warnings, []);
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.ruleId),
+        ['PRESS010_NAME_LAW_INPUT'],
+      );
+    },
+    {
+      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+        'name:sales_order': 1,
+      }),
+    },
+  );
+});
+
+test('BUILD-MODE-1: a ratified engine ID is exempt in every mode; the same name outside it is not', () => {
+  const policyPath = 'test/architecture/first-party-names.policy.json';
+  const ratified = {
+    ...nameLawPolicy,
+    ratifiedEngineIds: [
+      { id: 'acme.ledger:role.sales_order', reason: 'fixture ratification' },
+    ],
+  };
+  withNameLawFixture(
+    {
+      [policyPath]: JSON.stringify(ratified),
+      'db/migrations/0072_new.sql': "SELECT 'acme.ledger:role.sales_order';\n",
+    },
+    (result) => {
+      assert.deepEqual(nameLawViolations(result), []);
+      assert.deepEqual(result.warnings, []);
+    },
+  );
+  withNameLawFixture(
+    {
+      [policyPath]: JSON.stringify(ratified),
+      'db/migrations/0072_new.sql':
+        "SELECT 'acme.ledger:role.sales_order', 'acme.app:role.sales_order';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.ruleId),
+        ['PRESS011_FIRST_PARTY_NAME'],
+      );
+    },
+  );
+  withNameLawFixture(
+    {
+      [policyPath]: JSON.stringify({
+        ...nameLawPolicy,
+        ratifiedEngineIds: [{ id: 'sales_order', reason: 'too broad' }],
+      }),
+    },
+    (result) => {
+      assert.match(
+        nameLawViolations(result)[0]?.message ?? '',
+        /not a namespaced engine ID/u,
+      );
+    },
+  );
+});
+
+test('BUILD-MODE-1: the real policy ratifies exactly the reviewed ledger roles', () => {
+  const policy = JSON.parse(
+    readFileSync('test/architecture/first-party-names.policy.json', 'utf8'),
+  ) as { ratifiedEngineIds: { id: string }[] };
+  assert.deepEqual(
+    policy.ratifiedEngineIds.map((row) => row.id),
+    [
+      'northstar.ledger:role.customer_credit',
+      'northstar.ledger:role.inventory_asset',
+    ],
+  );
+});

@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
+import { buildModeSwitch } from './build-mode.js';
+
 export type ModulePressLawRuleId =
   | 'PRESS001_NO_MODULES'
   | 'PRESS002_MODULE_DESCRIPTOR'
@@ -35,6 +37,31 @@ export interface ModulePressLawResult {
   readonly nameLaw: NameLawResult;
   readonly scannedFiles: number;
   readonly violations: readonly ModulePressLawViolation[];
+  /**
+   * BUILD-MODE-1: name-law observations (PRESS011-PRESS015) reported instead
+   * of failed while `build-mode.json` has `nameGuardReportOnly` on. Always
+   * empty in enforce mode. PRESS010 (malformed input, a changed frozen
+   * migration) and PRESS001-PRESS009 are never moved here.
+   */
+  readonly warnings: readonly ModulePressLawViolation[];
+}
+
+export type NameLawMode = 'enforce' | 'report';
+
+export interface ModulePressLawOptions {
+  /**
+   * Defaults to `report` when `<root>/build-mode.json` turns on
+   * `nameGuardReportOnly` (and NORTH_STAR_BUILD_MODE is not `off`), else
+   * `enforce`. A tree without build-mode.json is enforced.
+   */
+  readonly nameLawMode?: NameLawMode;
+}
+
+/** The name-law rules build mode reports instead of failing. */
+export function isNameLawObservationRule(
+  ruleId: ModulePressLawRuleId,
+): boolean {
+  return isNameLawRule(ruleId) && ruleId !== 'PRESS010_NAME_LAW_INPUT';
 }
 
 interface ModuleDescriptor {
@@ -97,8 +124,12 @@ const glueRoles = [
 
 export function checkModulePressLaw(
   rootDirectory: string,
+  options: ModulePressLawOptions = {},
 ): ModulePressLawResult {
   const root = resolve(rootDirectory);
+  const nameLawMode =
+    options.nameLawMode ??
+    (buildModeSwitch('nameGuardReportOnly', { root }) ? 'report' : 'enforce');
   const violations: ModulePressLawViolation[] = [];
   const scanned = new Set<string>();
   const modules = discoverModules(root, violations, scanned);
@@ -192,6 +223,13 @@ export function checkModulePressLaw(
     );
   }
 
+  const ordered = violations.toSorted((left, right) =>
+    `${left.file}:${String(left.line).padStart(8, '0')}:${left.ruleId}:${left.moduleDirectory ?? ''}`.localeCompare(
+      `${right.file}:${String(right.line).padStart(8, '0')}:${right.ruleId}:${right.moduleDirectory ?? ''}`,
+    ),
+  );
+  const reported = (violation: ModulePressLawViolation): boolean =>
+    nameLawMode === 'report' && isNameLawObservationRule(violation.ruleId);
   return Object.freeze({
     moduleDirectories: Object.freeze(
       modules.map((module) => module.directory).toSorted(),
@@ -200,18 +238,24 @@ export function checkModulePressLaw(
     nameLaw,
     productionFilesRead: productionFiles.length,
     scannedFiles: scanned.size,
-    violations: Object.freeze(
-      violations.toSorted((left, right) =>
-        `${left.file}:${String(left.line).padStart(8, '0')}:${left.ruleId}:${left.moduleDirectory ?? ''}`.localeCompare(
-          `${right.file}:${String(right.line).padStart(8, '0')}:${right.ruleId}:${right.moduleDirectory ?? ''}`,
-        ),
-      ),
-    ),
+    violations: Object.freeze(ordered.filter((v) => !reported(v))),
+    warnings: Object.freeze(ordered.filter(reported)),
   });
 }
 
 export function formatModulePressLaw(result: ModulePressLawResult): string {
-  const nameLaw = formatNameLaw(result.nameLaw);
+  const nameLaw = [
+    ...formatNameLaw(result.nameLaw),
+    ...(result.warnings.length === 0
+      ? []
+      : [
+          `name-law (build mode, report only): ${String(result.warnings.length)} warning(s); convert before the hardening pass`,
+          ...result.warnings.map(
+            (warning) =>
+              `  WARNING ${warning.file}:${String(warning.line)} [${warning.ruleId}] ${warning.message}`,
+          ),
+        ]),
+  ];
   if (result.violations.length === 0) {
     return [
       `module-press-law: PASS (${String(result.modulesRead)} modules, ${String(result.scannedFiles)} files)`,
@@ -1077,6 +1121,12 @@ export interface NameLawBaseline {
 
 interface NameLawPolicy {
   readonly excluded: readonly string[];
+  /**
+   * Ratified engine IDs (e.g. `northstar.ledger:role.inventory_asset`): exact
+   * strings the name law never counts, in any mode. Each row carries a reason
+   * and is reviewed with the policy (a Critical file). Optional; absent = none.
+   */
+  readonly ratifiedEngineIds: readonly string[];
   readonly externalNames: readonly {
     readonly file: string;
     readonly name: string;
@@ -1145,6 +1195,18 @@ const nameLawExtensions = new Set([
 
 export function isNameLawRule(ruleId: ModulePressLawRuleId): boolean {
   return ruleId >= 'PRESS010';
+}
+
+/**
+ * Every exact occurrence of a ratified engine ID becomes spaces of the same
+ * length, so offsets (and line numbers) are unchanged and no name inside the
+ * ID is observed. Only the whole ID is exempt: the same name anywhere else in
+ * the file is still counted.
+ */
+function blankRatified(text: string, ids: readonly string[]): string {
+  let result = text;
+  for (const id of ids) result = result.replaceAll(id, ' '.repeat(id.length));
+  return result;
 }
 
 function checkNameLaw(
@@ -1253,7 +1315,10 @@ function checkNameLaw(
     const repoPath = normalizePath(relative(root, file));
     const source = readFileSync(file, 'utf8');
     const sourceFile = parseScriptSource(source, repoPath);
-    const text = withoutComments(source, sourceFile);
+    const text = blankRatified(
+      withoutComments(source, sourceFile),
+      policy.ratifiedEngineIds,
+    );
     const owner = owners.get(repoPath);
     const keys = new Map<string, ObservedKey>();
     const observe = (
@@ -1296,7 +1361,11 @@ function checkNameLaw(
           ),
       ),
       ...constructions.flatMap((construction) =>
-        nameHits(construction.value, vocabulary, true).map((hit) => ({
+        nameHits(
+          blankRatified(construction.value, policy.ratifiedEngineIds),
+          vocabulary,
+          true,
+        ).map((hit) => ({
           ...hit,
           index: construction.index,
         })),
@@ -1896,6 +1965,22 @@ function parsePolicy(value: unknown): NameLawPolicy {
     platformOwned: named('platformOwned', ['name', 'reason']).map((row) => ({
       name: row.name ?? '',
     })),
+    ratifiedEngineIds:
+      policy.ratifiedEngineIds === undefined
+        ? []
+        : named('ratifiedEngineIds', ['id', 'reason']).map((row) => {
+            const id = row.id ?? '';
+            if (
+              !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+:[a-z][a-z0-9_.]*$/u.test(
+                id,
+              )
+            ) {
+              throw new Error(
+                `policy ratifiedEngineIds ${id} is not a namespaced engine ID`,
+              );
+            }
+            return id;
+          }),
     requiredNames: stringList(policy.requiredNames, 'policy requiredNames'),
     scope: stringList(policy.scope, 'policy scope'),
     vocabularySources: stringList(
@@ -2025,9 +2110,15 @@ export function parseNameLawBaseline(value: unknown): NameLawBaseline {
 export function lowerNameLawBaseline(
   baseline: NameLawBaseline,
   observations: NameLawResult['observations'],
+  mode: NameLawMode = 'enforce',
 ): NameLawBaseline {
   const files: Record<string, NameLawBaselineFile> = {};
-  for (const [file, keys] of Object.entries(observations)) {
+  // BUILD-MODE-1: in report mode a rise or a new name keeps its allowance (or
+  // stays absent) instead of refusing, so names that fell are still lowered.
+  // Nothing is ever raised in either mode.
+  for (const [file, keys] of mode === 'report'
+    ? []
+    : Object.entries(observations)) {
     for (const [key, count] of Object.entries(keys)) {
       const allowance = baseline.files[file]?.names[key];
       if (allowance === undefined || count > allowance) {

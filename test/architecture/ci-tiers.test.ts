@@ -259,6 +259,68 @@ test('check-records rejects a new packet missing the tier attached to its CI run
   }
 });
 
+test('BUILD-MODE-1: build mode reports a missing CI tier line without failing; off, it fails again', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'build-mode-record-'));
+  const script = resolve('scripts/check-record-ci-tier.mjs');
+  const run = (env: Record<string, string | undefined> = {}) =>
+    spawnSync(process.execPath, [script], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, NORTH_STAR_BUILD_MODE: undefined, ...env },
+    });
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-qm',
+        'baseline',
+      ],
+      { cwd: dir },
+    );
+    mkdirSync(join(dir, 'docs/execution/packets'), { recursive: true });
+    writeFileSync(
+      join(dir, 'docs/execution/packets/new.md'),
+      'CI passed somewhere\n',
+    );
+    const config = (enabled: boolean, recordChecksReportOnly: boolean) =>
+      writeFileSync(
+        join(dir, 'build-mode.json'),
+        JSON.stringify({
+          enabled,
+          switches: { recordChecksReportOnly },
+          version: 1,
+        }),
+      );
+    config(true, true);
+    const reported = run();
+    assert.equal(reported.status, 0, reported.stderr);
+    assert.match(
+      reported.stderr,
+      /WARNING \(build mode, not failing\): .*expected one "CI tier/u,
+    );
+    for (const strict of [
+      () => run({ NORTH_STAR_BUILD_MODE: 'off' }),
+      () => (config(false, true), run()),
+      () => (config(true, false), run()),
+      () => (rmSync(join(dir, 'build-mode.json')), run()),
+    ]) {
+      const refused = strict();
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /expected one "CI tier/u);
+      assert.doesNotMatch(refused.stderr, /WARNING/u);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a pending CI tier marker is accepted on a packet branch only (CI-8)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-8-pending-'));
   const record = join(dir, 'docs/execution/packets/new.md');

@@ -59,5 +59,15 @@
       "name": "location_type",
       "reason": "The geocoding provider's own response key (geometry.location_type), not the first-party Location field."
     }
+  ],
+  "ratifiedEngineIds": [
+    {
+      "id": "northstar.ledger:role.customer_credit",
+      "reason": "Ledger core role ratified in 0071_ledger_journal_core (ACCOUNTING-1); an engine role ID, not first-party application vocabulary. Exempt in every mode (BUILD-MODE-1)."
+    },
+    {
+      "id": "northstar.ledger:role.inventory_asset",
+      "reason": "Ledger core role ratified in 0071_ledger_journal_core (ACCOUNTING-1); an engine role ID, not first-party application vocabulary. Exempt in every mode (BUILD-MODE-1)."
+    }
   ]
 }

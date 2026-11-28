@@ -20,12 +20,15 @@ import {
   greenInput,
   runRecordClaimControls,
 } from './record-claim-fidelity-controls.js';
+import { buildModeSwitch } from '../../scripts/build-mode.mjs';
 
 const root = repositoryRoot();
 
 test('the record layer is clean at this tree', (context) => {
   const report = verifyRecordClaims(collectRepositoryInput(root));
   context.diagnostic(formatReport(report));
+  // BUILD-MODE-1, switch `recordChecksReportOnly`: reported, not failed.
+  if (buildModeSwitch('recordChecksReportOnly', { root })) return;
   assert.deepEqual(
     report.findings.map(({ code, subject }) => `${code} ${subject}`),
     [],

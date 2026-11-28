@@ -147,8 +147,8 @@
       "name": "guard-widen-construction-off",
       "claim": "A statically concatenated first-party name is refused (F2).",
       "file": "packages/dev-tooling/src/module-press-law.ts",
-      "original": "nameHits(construction.value, vocabulary, true)",
-      "replacement": "nameHits('', vocabulary, true)",
+      "original": "blankRatified(construction.value, policy.ratifiedEngineIds)",
+      "replacement": "''",
       "test": {
         "files": ["test/architecture/module-press-law.test.ts"],
         "namePattern": "^GUARD-WIDEN"

@@ -86,6 +86,7 @@ import {
 } from '../fixtures/g2/module-conformance/definitions.js';
 import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { expectedMigrationNames } from '../helpers/migration-list.js';
 
 const migrations = resolve('db/migrations');
 const checkedInSnapshot = resolve('db/schema.snapshot.json');
@@ -152,75 +153,10 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
         assert.equal(acceptedG1.applied.length, 6);
         const migrationResult = await runMigrations(admin, allMigrations);
-        assert.deepEqual(migrationResult.applied, [
-          '0007_module_storage_transitions.sql',
-          '0008_module_runtime_role_assumption.sql',
-          '0009_semantic_operation_receipts.sql',
-          '0010_semantic_operation_receipt_scope.sql',
-          '0011_module_fold_function_ddl_witness.sql',
-          '0012_saved_master_filters.sql',
-          '0013_release_verification_evidence.sql',
-          '0014_archive_excluding_module_uniqueness.sql',
-          '0015_inventory_storage_foundation.sql',
-          '0016_inventory_posting_receipt_digest_version.sql',
-          '0017_inventory_stock_count_receipt_digest_version.sql',
-          '0018_release_verification_derivations.sql',
-          '0019_inventory_release_provenance_and_partition_null_safety.sql',
-          '0020_semantic_aggregate_anchors.sql',
-          '0021_bounded_fresh_tenant_install_evidence.sql',
-          '0022_module_storage_relation_requiredness_relaxation.sql',
-          '0023_inventory_stock_count_companion_digest_version.sql',
-          '0024_module_storage_enum_domain_widening.sql',
-          '0025_current_authorization.sql',
-          '0026_inventory_projection_discrepancies.sql',
-          '0027_receipt_posting.sql',
-          '0028_sale_fulfillment.sql',
-          '0029_customization_patch_lineage.sql',
-          '0030_policy_epoch_bumps_both_scopes.sql',
-          '0031_policy_epoch_lock_and_ordered_bumps.sql',
-          '0032_customization_upgrades.sql',
-          '0033_definer_search_paths.sql',
-          '0034_customization_launch_patch_kinds.sql',
-          '0035_customization_upgrade_bindings.sql',
-          '0036_workflow_substrate.sql',
-          '0037_verified_release_history.sql',
-          '0038_workflow_review_fixes.sql',
-          '0039_activation_recovery.sql',
-          '0040_customization_permission_directory.sql',
-          '0041_workflow_authority.sql',
-          '0042_customization_patch_kind_identifier.sql',
-          '0043_workflow_approval_scope.sql',
-          '0044_document_attachments.sql',
-          '0045_staff_signin.sql',
-          '0046_workflow_approval_target_scope.sql',
-          '0047_staff_session_integrity.sql',
-          '0048_document_attachment_authority.sql',
-          '0049_staff_login_creation.sql',
-          '0050_booking_commitments.sql',
-          '0051_billing_rate_tables.sql',
-          '0052_address_connectors.sql',
-          '0053_booking_authority.sql',
-          '0054_workflow_retry_authority.sql',
-          '0055_staff_decision_proofs.sql',
-          '0056_booking_lock_order.sql',
-          '0057_billing_publication.sql',
-          '0058_address_connector_authority.sql',
-          '0059_booking_fulfilment.sql',
-          '0060_generated_document_sources.sql',
-          '0061_date_time_window_probe.sql',
-          '0062_booking_recovery.sql',
-          '0063_communication_threads.sql',
-          '0064_staff_decision_corrections.sql',
-          '0065_analysis_fixture.sql',
-          '0066_personal_inbox.sql',
-          '0067_workflow_start_limits.sql',
-          '0068_billing_publication_xid.sql',
-          '0069_record_template_library.sql',
-          '0070_record_creation_occurrences.sql',
-          '0071_ledger_journal_core.sql',
-          '0072_tax_catalog.sql',
-          '0073_business_calendar.sql',
-        ]);
+        assert.deepEqual(
+          migrationResult.applied,
+          expectedMigrationNames().slice(6),
+        );
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
       } finally {
