@@ -1412,8 +1412,8 @@ test(
                      ON (i.tenant_id, i.environment_id, i.invocation_id) = (g.tenant_id, g.environment_id, g.invocation_id)
                    JOIN platform.trust_business_change_documents d
                      ON (d.tenant_id, d.environment_id, d.change_document_id) = (i.tenant_id, i.environment_id, i.change_document_id)
-                  WHERE (g.tenant_id, g.environment_id, g.operation_id) = ($1,$2,$3) AND d.record_id = $4`,
-                [tenant, environment, CHART_SETUP, companyE],
+                  WHERE (g.tenant_id, g.environment_id, g.operation_id) = ($1,$2,$3) AND d.record_id = $5`,
+                [tenant, environment, CHART_SETUP, companyE, companyE],
               );
               assert.deepEqual(
                 rows[0],
