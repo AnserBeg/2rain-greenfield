@@ -4058,10 +4058,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // search exclusion of the price list a sales line records (1); then 1 for
   // counter sales: the search exclusion of the order's counter flag.
   // Stock counts add 5 field probes and retire 2 companion relation probes.
+  // DOCUMENT-POSTING adds 24, measured by full run 46154914337: Books'
+  // journal draft and its lines (the draft-and-line shapes of the documents
+  // above, with the kind and side enum rejections).
   assert.equal(
     servingScenarioCount,
-    674,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras, 32 for approvals (21 request, 10 settings, one supplier-reference exclusion), and 38 for sales extras (2 credit control, 35 price lists, 1 counter sales), and 3 for stock counts',
+    698,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras, 32 for approvals (21 request, 10 settings, one supplier-reference exclusion), and 38 for sales extras (2 credit control, 35 price lists, 1 counter sales), 3 for stock counts and 24 for the journal draft',
   );
   await assertFreshInstallLineageEvidence(
     pool,
