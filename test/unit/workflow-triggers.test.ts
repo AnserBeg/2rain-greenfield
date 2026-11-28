@@ -935,7 +935,10 @@ test('an engine fact starts only definitions of its own kind and fact (E4)', () 
     from_state: null,
     fact_id: fact,
   };
-  assert.ok(occurrenceMatchesDefinition(occurrence, definition));
+  assert.ok(
+    occurrenceMatchesDefinition(occurrence, definition),
+    'a fact starts a definition of its own kind, fact and value',
+  );
   assert.ok(
     !occurrenceMatchesDefinition(occurrence, {
       ...definition,
