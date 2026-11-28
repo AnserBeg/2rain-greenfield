@@ -6,7 +6,7 @@ authority, RLS-adjacent SQL, a migration and a reader rung) under charter rule 2
 AMENDMENTS, `/home/rvham/2rain-missions/DOCUMENT-POSTING-design-read.result.txt`), whose binding amendments 1-12 and
 thin first slice are the scope. The opening entry is slice 2 (`ledger.openingNotYet` until then).
 
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46154914337
 
 ## What was built
 
@@ -85,6 +85,16 @@ each misbound block refused with its reason.
 - Orchestrator ruling (build mode, 2026-11-28): the "preceding binary answers on, or compiles, the current base" halves
   of presentation-list, line-logical-fields, logical-fields, report-analysis-reader and planner-map are removed and
   listed in FIRST-TENANT-OWED; their refusal halves pin the operation-catalog-9 refusal.
+
+## Runs
+
+- Controls: 46154078239 (8 of 9 killed, restored green) and 46154917355 (the narrowed permission control, killed):
+  all nine killed with their declared reasons. Silent-harm review: Mythos MERGE.
+- Full run 1: 46149784858 (the fallout above). Retry: 46154914337 at a7f71160e: red only on two count pins fixed in
+  the next commits (the section-blocks goldens carry Books' navigation entry; the serving verification plan has 24
+  journal-draft scenarios, 698), and on shard 7 cancelled at its 30-minute wall clock while customization-validation
+  was still passing (green runs of other packets spend 24-30 minutes in that shard). The train's full run is the
+  next measurement (rule 24.5).
 
 ## Rule 16 and 17
 
