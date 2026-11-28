@@ -614,9 +614,13 @@ test(
           assert.deepEqual(
             (
               await pool.query<{ record_id: string; company_id: string }>(
+                // Scoped to the journey's two companies: the Customize
+                // verification rehearses fixtures in companies of its own,
+                // as the s1 suites' record-ID filters allow for.
                 `SELECT record_id, company_id FROM platform.record_creation_occurrences
-                  WHERE tenant_id = $1 AND record_type = $2 AND kind = 'created'`,
-                [tenantId, task],
+                  WHERE tenant_id = $1 AND record_type = $2 AND kind = 'created'
+                    AND company_id = ANY($3::uuid[])`,
+                [tenantId, task, [COMPANY, otherCompany]],
               )
             ).rows
               .map((r) => [r.record_id, r.company_id])
