@@ -2661,10 +2661,27 @@ function verificationPlanPayload(
   const materializedStateFieldIds = new Set(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
+  // OPEN-ITEM-1: the same shape for an open item's core-written figures and
+  // number. No create populates them (they leave every input; the core writes
+  // them at issue), so a probe through the create has no contract to probe.
+  // An application type has no create at all: only the core writes it.
+  const openItems = openItemsOf(packageRevision);
+  const coreWrittenFieldIds = new Set(
+    [...openItems.protectedFields.values()].flatMap((fields) => [...fields]),
+  );
+  const coreWrittenEntityIds = new Set(
+    [...openItems.operations.values()].flatMap((binding) =>
+      binding.bindingVersion === 'openItem.apply/v1'
+        ? [binding.application.entityId]
+        : [],
+    ),
+  );
   for (const field of packageRevision.fields.filter(
     (entry) =>
       entry.lifecycle === 'active' &&
-      !materializedStateFieldIds.has(entry.fieldId),
+      !materializedStateFieldIds.has(entry.fieldId) &&
+      !coreWrittenFieldIds.has(entry.fieldId) &&
+      !coreWrittenEntityIds.has(entry.entity.targetId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({
@@ -2697,7 +2714,9 @@ function verificationPlanPayload(
   }
   for (const relation of packageRevision.relations.filter(
     (entry) =>
-      entry.lifecycle === 'active' && entry.archiveBehavior === 'restrict',
+      entry.lifecycle === 'active' &&
+      entry.archiveBehavior === 'restrict' &&
+      !coreWrittenEntityIds.has(entry.sourceEntity.targetId),
   )) {
     addScenario({
       entityId: relation.sourceEntity.targetId,
@@ -2709,7 +2728,10 @@ function verificationPlanPayload(
     });
   }
   for (const query of packageRevision.queries.filter(
-    (entry) => entry.lifecycle === 'active' && entry.queryType === 'resolve',
+    (entry) =>
+      entry.lifecycle === 'active' &&
+      entry.queryType === 'resolve' &&
+      !coreWrittenEntityIds.has(entry.sourceEntity.targetId),
   )) {
     addScenario({
       entityId: query.sourceEntity.targetId,
@@ -2720,7 +2742,8 @@ function verificationPlanPayload(
     });
   }
   for (const entity of packageRevision.entities.filter(
-    (entry) => entry.lifecycle === 'active',
+    (entry) =>
+      entry.lifecycle === 'active' && !coreWrittenEntityIds.has(entry.entityId),
   )) {
     addScenario({
       entityId: entity.entityId,
