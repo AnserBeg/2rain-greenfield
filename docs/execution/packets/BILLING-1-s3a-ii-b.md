@@ -42,6 +42,13 @@ CI tier: pending full
 - The early-return term form keeps its timing: held cycles fall due as they open. Only the amount is clipped.
 - The served path still reviews only the first arrears cycle until s3b stores checkpoints, so an arrears fee term is reached only in a review whose period start is the final cycle (amendment 3 note).
 
+## Fix round (Mythos silent-harm review FIX, 2026-11-28)
+1. Money, under-bill. Setup: a fee `minimumTerm`, with `earlyReturn.bill: agreedEnd` and an agreed end inside the term. The cycle that opens between the return and the held agreed end was rated on the committed interval alone, so it lost the term. Figures: 783.87 instead of 900.00; August 183.87 instead of 300.00. Fixed: that cycle is rated on the committed interval united with the binding term. New control: billing-term-after-return.
+2. A use leg carrying the reserved committed identity could pose as a hold. `serviceUseCoverage` now refuses it, with a test.
+3. Note, recorded for slice (e). `committedFrom` is the earliest committed start across bands. This is unreachable on the served path, which has one band and one committed interval.
+4. Owner note, recorded in ADR-0083. A return inside the term's last cycle on an open-ended agreement bills that cycle whole under keepPaidPeriod, in both term forms and with no term: E1m returned Sep 5 gives 1,110.00. Here "never more" meets keepPaidPeriod, and no one has ruled on it.
+The first full run (46174010578, at 6c7a796db) was cancelled for the fix, not red. Its controls (46174014379, 18/18 green) ran at input ref 6c7a796db3613e6fe1b5186604074b4866ca5228.
+
 ## Owed
 - A fee `minimumTerm` longer than the 3,660-day calendar horizon (for example `{month, 744}`) throws on every early-ended review. It fails closed; a parse refusal is owed (the amendment-6 class).
 - Under `earlyReturn.bill: agreedEnd` the committed interval clip also applies to cycles opening after the return. It rates the same committed time the arrears side bills; the review should confirm it.
@@ -49,8 +56,8 @@ CI tier: pending full
 ## Rules 16, 17
 (a) Minimum terms suit rentals, leases, subscriptions, coworking and service contracts. Discounts suit any priced line, with per-customer and price-list discounts through overrides. Percentage components cover damage waivers, service charges, environmental fees and insurance. (b) Any recurring fee, time line or meter can use them unchanged. (c) Narrower: percent discounts only (amount discounts are slice f), one base per percentage component, and time in advance is slice e.
 
-## Controls (rule 24; test/evidence/BILLING-1.expected-red.json; 10 new, 2 re-pointed)
-New: billing-term-held-cycles, billing-term-prorated-to-end, billing-term-arrears-final-review, billing-committed-cycle-clip (the ruling's control), billing-discount-after-cap, billing-discount-net-entitlement, billing-percentage-at-most-100, billing-percentage-stage, billing-pricing-reader, billing-v5-key-states-timing.
+## Controls (rule 24; test/evidence/BILLING-1.expected-red.json; 11 new, 2 re-pointed)
+New: billing-term-held-cycles, billing-term-prorated-to-end, billing-term-arrears-final-review, billing-committed-cycle-clip (the ruling's control), billing-discount-after-cap, billing-discount-net-entitlement, billing-percentage-at-most-100, billing-percentage-stage, billing-pricing-reader, billing-v5-key-states-timing, billing-term-after-return (fix round).
 Re-pointed at the new coverage selection: billing-advance-agreed-not-elapsed, billing-advance-final-no-rerate. All 12 reproduced and restored with the local harness.
 
 ## Test it yourself
