@@ -11,6 +11,8 @@ import test from 'node:test';
 
 import { escapeIdentifier, type Pool } from 'pg';
 
+import { openCustomizeService } from '../../apps/api/src/composition-root.js';
+import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -107,15 +109,22 @@ async function lockWaiters(pool: Pool, count: number): Promise<void> {
 async function withRental(
   label: string,
   options: RentalOptions,
-  run: (world: AgentWorld, pool: Pool) => Promise<void>,
+  run: (
+    world: AgentWorld,
+    pool: Pool,
+    install: { databaseUrl: string; compiledApplication: unknown },
+  ) => Promise<void>,
 ) {
   await withEphemeralPostgres(
     label,
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
       // Installing runs release verification on the declaring release.
+      const compiledApplication = rentalApplication(
+        rentalContractAuthored(options),
+      );
       const runtime = await startRuntime(databaseUrl, label, {
-        compiledApplication: rentalApplication(rentalContractAuthored(options)),
+        compiledApplication,
       }).catch((error: unknown) =>
         assert.fail(
           `a declaring release failed to install: ${String(
@@ -124,7 +133,10 @@ async function withRental(
         ),
       );
       try {
-        await run(worldOver(runtime, String(connection.database)), pool);
+        await run(worldOver(runtime, String(connection.database)), pool, {
+          databaseUrl,
+          compiledApplication,
+        });
       } finally {
         await runtime.close();
       }
@@ -494,43 +506,6 @@ test(
           'a restore past the maximum was accepted',
         );
 
-        // Two concurrent creates at maximum - 1 under a parent-path
-        // validation: exactly one is refused by name, and none deadlocks. A
-        // deadlock is retried once by the write path, so it is observed in
-        // the database's own deadlock counter, not in the outcome.
-        const before = await deadlocks(pool);
-        for (let round = 0; round < 6; round += 1) {
-          const header = await contract();
-          for (let index = 0; index < 2; index += 1)
-            assert.equal(
-              (await line(header.recordId, { days: '1', daily_rate: '1' }))
-                .outcome,
-              'succeeded',
-            );
-          const raced = await Promise.all(
-            [0, 1].map(() =>
-              outcome(line(header.recordId, { days: '1', daily_rate: '1' })),
-            ),
-          );
-          assert.equal(
-            raced.filter((entry) => /"outcome":"succeeded"/u.test(entry))
-              .length,
-            1,
-            `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
-          );
-          assert.ok(
-            raced.some((entry) =>
-              /^MODULE_LINE_MAXIMUM_EXCEEDED /u.test(entry),
-            ),
-            `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
-          );
-        }
-        assert.equal(
-          await deadlocks(pool, before),
-          before,
-          'concurrent line creates under a parent-path validation deadlocked',
-        );
-
         // The header lock is taken before the path read (prepareMutation's
         // FOR SHARE on the parent). Made deterministic: a third session holds
         // the header FOR UPDATE, both creates queue on it, then it is
@@ -573,6 +548,43 @@ test(
           queued.filter((entry) => /"outcome":"succeeded"/u.test(entry)).length,
           1,
           queued.join(' | '),
+        );
+
+        // Two concurrent creates at maximum - 1 under a parent-path
+        // validation: exactly one is refused by name, and none deadlocks. A
+        // deadlock is retried once by the write path, so it is observed in
+        // the database's own deadlock counter, not in the outcome.
+        const before = await deadlocks(pool);
+        for (let round = 0; round < 6; round += 1) {
+          const header = await contract();
+          for (let index = 0; index < 2; index += 1)
+            assert.equal(
+              (await line(header.recordId, { days: '1', daily_rate: '1' }))
+                .outcome,
+              'succeeded',
+            );
+          const raced = await Promise.all(
+            [0, 1].map(() =>
+              outcome(line(header.recordId, { days: '1', daily_rate: '1' })),
+            ),
+          );
+          assert.equal(
+            raced.filter((entry) => /"outcome":"succeeded"/u.test(entry))
+              .length,
+            1,
+            `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
+          );
+          assert.ok(
+            raced.some((entry) =>
+              /^MODULE_LINE_MAXIMUM_EXCEEDED /u.test(entry),
+            ),
+            `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
+          );
+        }
+        assert.equal(
+          await deadlocks(pool, before),
+          before,
+          'concurrent line creates under a parent-path validation deadlocked',
         );
 
         // A shared line's update and its archive never deadlock: both lock
@@ -645,8 +657,41 @@ test(
     await withRental(
       'line-totals-template',
       { template: true, maximumLines: 200 },
-      async (world) => {
+      async (world, _pool, install) => {
         const { read, header } = arrange(world);
+        // Template verification needs the verifier connection, which only
+        // the Customize service's admission has: the binding is activated
+        // there, over the installed declaring release.
+        const opened = await openCustomizeService({
+          databaseUrl: install.databaseUrl,
+          tenantSlug: 'line-totals-template',
+          compiledApplication: install.compiledApplication as never,
+        });
+        try {
+          const offers = (await opened.service.targets()).templateBindings!;
+          const offer = offers.find(
+            (entry) => entry.frame.formId === TEMPLATE_FORM,
+          );
+          assert.ok(offer, 'the rental form offers no template binding');
+          const drafted = await opened.service.draft(
+            draftTemplateBinding(offers, {
+              formId: TEMPLATE_FORM,
+              contextId: null,
+              required: false,
+              lifecycle: 'active',
+              fields: offer.columns.map((column) => ({
+                fieldId: column.fieldId,
+                copyEligible: true,
+              })),
+            }),
+            'visualBuilder',
+          );
+          assert.ok(drafted.status === 'drafted', JSON.stringify(drafted));
+          await opened.service.approve(drafted.patchId);
+          await opened.service.activate(drafted.patchId);
+        } finally {
+          await opened.close();
+        }
         const library = world.runtime.recordTemplates;
         const run = <T>(work: (view: RequestRuntimeView) => Promise<T>) =>
           world.runtime.entry.run(

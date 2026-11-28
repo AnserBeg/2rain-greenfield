@@ -127,7 +127,6 @@ export const reachabilityProducers = [
   nodeProducer('postgres-1', 'postgres', 'test:postgres:1', [
     'test/postgres/workflow-consumer.test.ts',
     'test/postgres/report-analysis-reader.test.ts',
-    'test/postgres/customization-inspection.test.ts',
     'test/postgres/line-totals.test.ts',
   ]),
   nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
@@ -151,6 +150,7 @@ export const reachabilityProducers = [
     'test/postgres/board-policy.test.ts',
     'test/postgres/booking-serving.test.ts',
     'test/postgres/document-attachments.test.ts',
+    'test/postgres/customization-inspection.test.ts',
   ]),
   nodeProducer('postgres-7', 'postgres', 'test:postgres:7', [
     'test/postgres/agent-dev-tasks.test.ts',
