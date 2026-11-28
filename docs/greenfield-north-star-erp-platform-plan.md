@@ -3099,13 +3099,15 @@ usually live in that last group: an availability sheet, a pricing workbook, a
 checklist kept in a word-processing document. Configuration then
 starts from that picture instead of from interviews alone. Support status: planned.
 
-**What it produces.** Three outputs, all built automatically from one stream of events:
+**What it produces.** Four outputs, built automatically from one stream of events:
 
 - **workflow traces**: each recurring kind of work (a rental request, a parts order)
   followed step by step across people and tools;
 - **an information map**: for each piece of information, where it is created, where
   it is typed in again, and who uses it; and
-- **role cards**: each person's share of work, tools, and handoffs.
+- **role cards**: each person's share of work, tools, and handoffs; and
+- **workaround files**: full copies of the spreadsheets and documents people use to
+  work around the current system, with their data and formulas (rule 8).
 
 **How it captures.** Capture runs on company-owned work devices and work accounts for
 a bounded period (default two weeks, work hours only):
@@ -3135,6 +3137,18 @@ a bounded period (default two weeks, work hours only):
 - desktop business programs need the desktop app as well. Phone calls and
   text messages are not captured; a short interview per role fills them in.
 
+**Rare tasks.** Two weeks catches weekly work, but most monthly, quarterly and yearly
+work never happens inside the window. Discovery closes that gap four ways:
+
+- **the old system's own history:** timestamps or the audit log in the customer's
+  data export, over the last twelve months, list every transaction type and how
+  often it occurs, with nothing installed;
+- **window timing:** the capture window includes a month-end;
+- **a screen inventory:** every screen in the old system's menus that capture never
+  saw goes on the interview list; and
+- **an optional light mode:** after the two weeks, screen names only (no content)
+  keep being recorded for up to three months.
+
 **Automation.** Discovery runs without people in the loop except where consent needs
 one. Per-message extraction uses the small, fast model tier (Claude Haiku 5.5,
 `claude-haiku-5-5`, when this section was written) through the Messages API. It does
@@ -3151,22 +3165,31 @@ short interview per role covers phone and text work.
 2. Staff get written notice before install, reviewed by counsel: what is read, what
    is kept, for how long, where it is processed, and who sees the results. A visible
    indicator shows capture is running, with a pause.
-3. Never kept: raw message text, attachment contents, document body text,
-   spreadsheet cell values, screenshots, keystrokes, passwords, or identifier values.
-   Document and spreadsheet content is read only to describe what the file is for,
-   then discarded; its structure and activity are kept.
+3. Never kept: raw message text, attachment contents, screenshots, keystrokes,
+   passwords, or identifier values. Document and spreadsheet content is read to
+   describe what the file is for, then discarded; its structure and activity are
+   kept. The one exception is approved workaround files (rule 8).
 4. Results are for system design, never for performance evaluation. The customer
    agreement says so.
 5. Customers' and suppliers' details in scanned content are kept only as codes and
    categories.
 6. Raw content is deleted right after extraction. Event data is deleted when setup
-   completes. Only the report survives, and the customer owns it.
+   completes. Only the report survives, and the customer owns it; workaround file
+   copies are deleted or handed back at the same time.
 7. Event data is held by our discovery service, hosted in Canada. Extraction runs
    outside Canada: as of 2026-11-28 the Claude API runs inference either globally or
    in the US only, and has no Canada-only option. The model workspace runs under zero
    data retention (Haiku 5.5 is listed as eligible; confirmed with Anthropic before
    the pilot). The staff notice says where content is processed. A Canadian-region
    option is adopted when one becomes available.
+8. Workaround files are copied in full (data, formulas, tabs, macros) only after the
+   customer approves them. Discovery proposes candidates automatically: files opened
+   repeatedly, tied to work items, or repeating data the current system already holds.
+   The owner approves the list in one step, and each employee can see which of their
+   files are on it. Copies are taken at the start and the end of the window, stored
+   encrypted on our service in Canada, and analyzed there: formulas and structure by
+   our own code, while the model sees only what it needs to describe the file's
+   purpose.
 
 **Boundary with the platform.** Discovery is an onboarding tool outside the tenant
 runtime. It reads nothing from and writes nothing to a tenant release. Its report may
@@ -3180,7 +3203,9 @@ monolith (section 3 rule 12).
 
 **Versions.** Version 1 (pilot): the browser add-on; email, work-chat, document and
 spreadsheet extraction for files in Microsoft 365 or Google Drive; identifier codes;
-self-review; and automatic traces, map and role cards. Version 2: matching against the
+self-review; approved workaround file copies; rare-task coverage from the old
+system's history and its screen inventory, with the optional light mode; and
+automatic traces, map and role cards. Version 2: matching against the
 customer's data export; a desktop app for desktop business programs and for documents
 and spreadsheets kept only on a laptop or network share; extraction on the laptop
 itself if it runs well on ordinary office hardware. If the pilot customer keeps key
@@ -3192,7 +3217,11 @@ moves into version 1.
 - a discovery report the customer approved;
 - traces whose steps link across at least email, a spreadsheet or document, and the
   current system;
-- logs showing that raw content and event data were deleted on schedule;
+- every transaction type in the old system's last twelve months either seen in
+  capture or covered in the interview;
+- the approved workaround file list, and the analysis of each file's formulas;
+- logs showing that raw content, event data and workaround copies were deleted or
+  handed back on schedule;
 - a staff notice reviewed by counsel; and
 - a record that staff used the self-review.
 
@@ -4254,6 +4283,7 @@ re-ratifies the target before promotion.
 | Derived-store sprawl         | search, graph and formula engines drift from PostgreSQL, and two permission models disagree | one PostgreSQL authority; a new store needs a measured reason and must be a rebuildable read model under the same policy |
 | Discovery read as surveillance | staff refuse it or work differently while it runs, and the customer's trust is lost | section 11.11.1's rules: work devices only, written notice, self-review, no performance use, a bounded period |
 | Discovery content exposure   | raw email, chat, document or spreadsheet content leaks from the extraction step or the model provider | deletion right after extraction, identifier codes, zero data retention, processing location disclosed in the notice |
+| Discovery holds customer files | approved workaround copies carry prices, customer names and business logic, and leak or outlive setup | owner approval per list, encryption in Canada, analysis by our own code, deletion or hand-back when setup completes (section 11.11.1 rule 8) |
 | Discovery as configuration authority | a discovery report is applied to a tenant without review | the report only seeds drafts; the normal release path and human activation (section 10.1) |
 | False gate confidence        | implementer-approved tests miss real behavior                     | evidence packets, independent review, real-model and recovery drills |
 
