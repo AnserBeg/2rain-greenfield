@@ -5,6 +5,10 @@ import {
 } from '../../canonical-model/src/line-totals.js';
 import type { VersionedNormalizedApplicationPackage } from '../../canonical-model/src/schemas.js';
 import {
+  declaresOpenItems,
+  OPEN_ITEM_OPERATION_READER,
+} from '../../canonical-model/src/open-item.js';
+import {
   hasRecordTemplateBinding,
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
@@ -1075,19 +1079,25 @@ function definitionFromSnapshotRows(
   );
   if (!lineTotals)
     throw malformedProjection('line-total declarations do not bind');
+  const openItems = declaresOpenItems(
+    declarations.definition as unknown as VersionedNormalizedApplicationPackage,
+  );
   if (
-    lineTotals.operation
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : templates
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : booking
-          ? operationFloor !== expectedBookingFloor
-          : operationFloor >= BOOKING_OPERATION_READER
+    openItems
+      ? operationFloor !== OPEN_ITEM_OPERATION_READER
+      : lineTotals.operation
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : templates
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : booking
+            ? operationFloor !== expectedBookingFloor
+            : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
+    !openItems &&
     !lineTotals.operation &&
     !booking &&
     !templates &&

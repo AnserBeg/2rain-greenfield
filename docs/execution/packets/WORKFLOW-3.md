@@ -54,7 +54,7 @@ Not re-proved, because unchanged by this slice: the occurrence start-key index a
 
 Rung 55 (assigned at TRAIN-Y; provisional 54). No preceding-binary proof was built; a FIRST-TENANT-OWED row was added.
 
-**Slice 1b · engineFactChanged (Booking commitment states), BUILD 2026-11-28.** Critical (migration, a definer in a capability writer, grant SQL; rule 24). Design: `notes/WORKFLOW-3-s1b` design note; Mythos design read APPROVE WITH AMENDMENTS E1-E9. Migrations 0076 (generic) and 0077 (Booking) and rung 56 are provisional. **Merge gate E9:** 0077 needs an owner or delegated ADR-0073 line.
+**Slice 1b · engineFactChanged (Booking commitment states), BUILD 2026-11-28.** Critical (migration, a definer in a capability writer, grant SQL; rule 24). Design: `notes/WORKFLOW-3-s1b` design note; Mythos design read APPROVE WITH AMENDMENTS E1-E9. Migrations 0077 (generic) and 0078 (Booking) and rung 57 are provisional (renumbered after TRAIN-Z took 0076 and rung 56). **Merge gate E9:** 0078 needs an owner or delegated ADR-0073 line.
 
 ## What slice 1b adds
 
@@ -62,8 +62,8 @@ Rung 55 (assigned at TRAIN-Y; provisional 54). No preceding-binary proof was bui
 - Member `{kind: 'engineFactChanged', triggerVersion: 'v1', factId, recordTypeId, toValueId, fromValueId?}`; event `TriggerEvent` with `factId`, `subjectId`, `fromValueId`, `toValueId`; fact, type and value are literals.
 - Engine-owned declarations (`engine-facts.ts` registry; Booking's provider in `booking.ts`), derived from the release's own Booking bindings: no catalog byte changes.
 - Admission: the owner type passes the record-type rule; the fact is declared on it; both values are declared; a declared move connects them; a value any timer enters is refused (E3).
-- 0076: kind `engineFact`, fact/subject/revision/invocation columns, the source-shape CHECK (writer columns stay NOT NULL for created and transitioned), the deferred invocation FK, the (fact, subject, revision) key, `engine_facts` (no runtime grant), definitions `fact_id` with the third CHECK arm, digest and binding appended only when present (E6), and page and scope invocation arms with kind by event type (E4/E5).
-- 0077: Booking's `booking_record_change` and `booking_record_kit` call `booking_emit_state_fact` after each history row; tenant, environment and company come from the commitment and owner cursor, and the owner table from the handed release's storage target (E2).
+- 0077: kind `engineFact`, fact/subject/revision/invocation columns, the source-shape CHECK (writer columns stay NOT NULL for created and transitioned), the deferred invocation FK, the (fact, subject, revision) key, `engine_facts` (no runtime grant), definitions `fact_id` with the third CHECK arm, digest and binding appended only when present (E6), and page and scope invocation arms with kind by event type (E4/E5).
+- 0078: Booking's `booking_record_change` and `booking_record_kit` call `booking_emit_state_fact` after each history row; tenant, environment and company come from the commitment and owner cursor, and the owner table from the handed release's storage target (E2).
 - Consumer, run event, `runTrigger`, admission storage, the Customize label and drafter line switch on event type and fact ID (E4).
 
 ## Test it yourself

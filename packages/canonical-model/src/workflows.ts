@@ -18,9 +18,9 @@ export const RECORD_TRANSITIONED_EVENT_TYPE =
   'northstar.runtime:event.record-transitioned';
 /**
  * ADR-0073 A1 engineFactChanged (WORKFLOW-3 s1b). Its own rung, never
- * reserved: provisional 56 (main's highest is 55); assigned at merge.
+ * reserved: provisional 57 (main's highest is BILLING's 56); assigned at merge.
  */
-export const ENGINE_FACT_TRIGGER_READER = 56;
+export const ENGINE_FACT_TRIGGER_READER = 57;
 /** The platform event type an engineFactChanged definition persists. */
 export const ENGINE_FACT_CHANGED_EVENT_TYPE =
   'northstar.runtime:event.engine-fact-changed';

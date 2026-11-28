@@ -9,6 +9,11 @@ import {
   BOOKING_CAPABILITY,
   BookingOperationBinding,
 } from '@north-star/canonical-model';
+import {
+  OPEN_ITEM_APPLY_CAPABILITY,
+  OPEN_ITEM_ISSUE_CAPABILITY,
+  OpenItemOperationBinding,
+} from '../../canonical-model/src/open-item.js';
 import { authorizedDateTimeWorkingCompany } from './date-time-working-company.js';
 import { recordCatalogParse } from './catalog-parse-count.js';
 import {
@@ -114,6 +119,8 @@ export interface RegisteredRecordOperationDefinition extends RegisteredOperation
 
 export interface RegisteredCapabilityOperationDefinition extends RegisteredOperationDefinitionBase {
   readonly booking?: BookingOperationBinding;
+  /** OPEN-ITEM-1: the compiled binding an issue or apply executes by. */
+  readonly openItem?: OpenItemOperationBinding;
   readonly effect: {
     readonly capability: {
       readonly kind: string;
@@ -1501,6 +1508,7 @@ export function assertPinnedOperationDefinition(
       ...(hasInputContract ? ['inputContract'] : []),
       ...(hasLabel ? ['label'] : []),
       ...(Object.hasOwn(value, 'booking') ? ['booking'] : []),
+      ...(Object.hasOwn(value, 'openItem') ? ['openItem'] : []),
       ...(hasExcludedRoles ? ['excludedRoleKeys'] : []),
     ],
     invalid,
@@ -1557,6 +1565,28 @@ export function assertPinnedOperationDefinition(
     )
       throw invalid(
         'booking operation requires a released binding and the declared approval',
+      );
+  }
+  // OPEN-ITEM-1: an open-item operation carries exactly its binding, and a
+  // binding rides only the person-confirmed core operation it was compiled for.
+  const openItemCapability =
+    isRecord(value.effect.capability) &&
+    (value.effect.capability.targetId === OPEN_ITEM_ISSUE_CAPABILITY ||
+      value.effect.capability.targetId === OPEN_ITEM_APPLY_CAPABILITY);
+  if (Object.hasOwn(value, 'openItem') || openItemCapability) {
+    const binding = OpenItemOperationBinding.safeParse(value.openItem);
+    if (
+      !binding.success ||
+      value.effect.kind !== 'registeredCapabilityEffect' ||
+      !isRecord(value.effect.capability) ||
+      value.effect.capability.targetId !==
+        (binding.data.bindingVersion === 'openItem.issue/v1'
+          ? OPEN_ITEM_ISSUE_CAPABILITY
+          : OPEN_ITEM_APPLY_CAPABILITY) ||
+      value.confirmation !== 'humanRequired'
+    )
+      throw invalid(
+        'open-item operation requires its released binding and the declared approval',
       );
   }
   if (value.effect.kind === 'registeredCapabilityEffect') {

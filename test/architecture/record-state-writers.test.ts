@@ -94,6 +94,11 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
       updates: 2,
       reason: 'Stock count state is a choice field; lines take counts.',
     },
+    'packages/postgres-provider/src/open-item-capability-executor.ts': {
+      updates: 1,
+      reason:
+        "Issue and settlement move an open item's own tenant-declared machine (draft to open, then partially settled or settled) with its figures. Open-item normalization refuses any active generic transition on that machine, so recordTransitioned admission (every transition generic) never admits it; no first-party release declares an open item, so no machine is listed (TRAIN-Z). test/unit/workflow-triggers.test.ts compiles that refusal.",
+    },
     'packages/postgres-provider/src/receiving-order-capability.ts': {
       updates: 1,
       reason: 'Archives a staged amendment proposal.',

@@ -46,6 +46,12 @@ import { parseCompiledApplication } from '../../packages/postgres-provider/src/c
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
+  NOTE,
+  NS as OPEN_ITEM_NS,
+  compileOpenItems,
+  openItemAuthored,
+} from '../helpers/open-item-fixture.js';
+import {
   BUILD_CASES,
   RECORD_TEMPLATE_CASES,
   WORKFLOW_TRANSITION_CASES,
@@ -985,7 +991,7 @@ test("Booking's SQL emit maps exactly the seven stored states to the declared va
     .sort();
   assert.deepEqual(states, Object.keys(value).sort());
   const emit = readFileSync(
-    'db/migrations/0077_booking_engine_facts.sql',
+    'db/migrations/0078_booking_engine_facts.sql',
     'utf8',
   );
   const mapping =
@@ -1003,4 +1009,55 @@ test("Booking's SQL emit maps exactly the seven stored states to the declared va
       `${state} maps to its declared value`,
     );
   assert.match(emit, new RegExp(`'${fact}'`, 'u'));
+});
+
+// TRAIN-Z (OPEN-ITEM-1 s1): the census classifies the open-item executor by
+// reading only, because no recordTransitioned workflow can be admitted on an
+// open item's machine: the core's issue is not a generic transition (and
+// normalization refuses an active generic one), so admission refuses it.
+test('a recordTransitioned workflow on an open item machine is refused at compile', () => {
+  const workflow = (trigger: unknown) => ({
+    schemaVersion: 'v6',
+    workflowId: 'fee-note-follow-up',
+    trigger,
+    bodyDigest: 'a'.repeat(64),
+    grants: { queries: [], operations: [] },
+  });
+  const compileWith = (trigger: unknown) => {
+    const { authored, bindings } = openItemAuthored();
+    return compileOpenItems(
+      { ...authored, workflows: [workflow(trigger)] },
+      bindings,
+    );
+  };
+  const machine = `${OPEN_ITEM_NS}:machine.custom_fee_note`;
+  const refused = compileWith({
+    kind: 'recordTransitioned',
+    triggerVersion: 'v1',
+    recordTypeId: NOTE,
+    toStateId: `${OPEN_ITEM_NS}:state.custom_fee_note_open`,
+  });
+  assert.notEqual(refused.status, 'compiled', 'an open item move was admitted');
+  assert.match(
+    JSON.stringify(refused),
+    /Workflow trigger machine has a transition no generic transition operation performs/u,
+    'the refusal is the generic-writer rule',
+  );
+  assert.match(
+    JSON.stringify(refused),
+    new RegExp(machine.replaceAll('.', '\\.'), 'u'),
+    'the refusal names the open item machine',
+  );
+  // The same workflow on the same type's creations compiles, so the refusal
+  // is the machine's, not the workflow's shape.
+  const created = compileWith({
+    kind: 'recordCreated',
+    triggerVersion: 'v1',
+    recordTypeId: NOTE,
+  });
+  assert.equal(
+    created.status,
+    'compiled',
+    JSON.stringify(created.status === 'compiled' ? [] : created.diagnostics),
+  );
 });

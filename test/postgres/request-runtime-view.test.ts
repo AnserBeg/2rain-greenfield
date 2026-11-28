@@ -13,6 +13,7 @@ import {
   BILLING_ARREARS_READER,
   BILLING_ALLOCATION_READER,
   BILLING_RULES_READER,
+  BILLING_TIMING_READER,
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
 import { RECORD_TEMPLATE_READER } from '../../packages/canonical-model/src/record-template.js';
@@ -569,6 +570,7 @@ test('the capability comparison binds the family to its capability, then compare
     LINE_LOGICAL_FIELD_READER,
     BILLING_RULES_READER,
     RECORD_TRANSITIONED_TRIGGER_READER,
+    BILLING_TIMING_READER,
     ENGINE_FACT_TRIGGER_READER,
   ];
   // Each capability owns its own rung: a renumbering collision at a merge

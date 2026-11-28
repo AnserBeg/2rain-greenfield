@@ -6,8 +6,10 @@ import {
   BILLING_INTERVAL_READER,
   BILLING_ARREARS_READER,
   BILLING_RULES_READER,
+  BILLING_TIMING_READER,
   billingEvidenceQuery,
   hasBillingRules,
+  hasBillingTiming,
   type BillingEvidenceQuery,
 } from '../../canonical-model/src/billing.js';
 import { serviceUseProvider } from '../../canonical-model/src/service-evidence.js';
@@ -70,11 +72,13 @@ export function billingQuoteReadModel(
     if (
       !p?.bindings ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        (hasBillingRules(p)
-          ? BILLING_RULES_READER
-          : p.bindings.arrearsSource
-            ? BILLING_ARREARS_READER
-            : BILLING_INTERVAL_READER) ||
+        (hasBillingTiming(p)
+          ? BILLING_TIMING_READER
+          : hasBillingRules(p)
+            ? BILLING_RULES_READER
+            : p.bindings.arrearsSource
+              ? BILLING_ARREARS_READER
+              : BILLING_INTERVAL_READER) ||
       definition.queryType !== 'get' ||
       result.records.length !== 1 ||
       !args ||
@@ -282,9 +286,12 @@ async function readArrearsCycle(
       row,
       evidenceQuery,
     );
-  const cycle = dueArrearsCycle(plan, evidence);
-  if (!cycle) return { status: 'notDue' as const };
+  // An agreed interval reviews its closed cycle and, for an advance fee, its
+  // opened cycles (reviewArrearsCharges decides which are due).
   if (arrears.kind === 'periodMeter') {
+    // A meter plan never bills in advance (refused at parse).
+    const cycle = dueArrearsCycle(plan, evidence);
+    if (!cycle) return { status: 'notDue' as const };
     const missing = [
       arrears.openingReadingFieldId,
       arrears.openingInstantFieldId,

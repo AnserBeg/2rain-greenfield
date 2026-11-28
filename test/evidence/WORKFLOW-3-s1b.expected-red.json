@@ -5,7 +5,7 @@
     {
       "name": "wf3b-history-writer-names-state-change",
       "claim": "Booking's single history writer names each commitment state change in its own transaction.",
-      "file": "db/migrations/0077_booking_engine_facts.sql",
+      "file": "db/migrations/0078_booking_engine_facts.sql",
       "original": "  PERFORM north_star_internal.booking_emit_state_fact(previous.state,fact,owner_row,r,receipt);",
       "replacement": "  PERFORM 1;",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "wf3b-fact-receipt-seal",
       "claim": "A fact whose receipt (invocation) is never written refuses commit.",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "  ADD CONSTRAINT record_occurrences_fact_invocation FOREIGN KEY (tenant_id, environment_id, invocation_id)\n    REFERENCES platform.trust_action_invocations (tenant_id, environment_id, invocation_id)\n    DEFERRABLE INITIALLY DEFERRED;",
       "replacement": "  ADD CONSTRAINT record_occurrences_fact_invocation CHECK (kind <> 'engineFact' OR invocation_id IS NOT NULL);",
       "test": {
@@ -39,7 +39,7 @@
     {
       "name": "wf3b-fact-revision-key",
       "claim": "One occurrence per fact, subject and subject revision.",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "  ADD CONSTRAINT record_occurrences_fact_key UNIQUE\n    (tenant_id, environment_id, fact_id, subject_id, subject_revision),",
       "replacement": "  ADD CONSTRAINT record_occurrences_fact_key CHECK (subject_revision IS NULL OR subject_revision > 0),",
       "test": {
@@ -56,7 +56,7 @@
     {
       "name": "wf3b-fact-scope-from-engine-rows",
       "claim": "The emit takes tenant and environment from the engine row, so the timer sweep with no tenant scope never aborts (E2).",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "      WHERE r.tenant_id = $8\n        AND r.environment_id = $9",
       "replacement": "      WHERE r.tenant_id = north_star_internal.trusted_tenant_id() AND $$8::uuid IS NOT NULL\n        AND r.environment_id = $$9",
       "test": {
@@ -73,7 +73,7 @@
     {
       "name": "wf3b-engine-facts-no-runtime-grant",
       "claim": "No runtime role may call engine_facts directly; only engine definer SQL names a fact (E2).",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) FROM PUBLIC;",
       "replacement": "  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) FROM PUBLIC;\nGRANT EXECUTE ON FUNCTION north_star_internal.engine_facts(\n  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) TO north_star_runtime;",
       "test": {
@@ -90,7 +90,7 @@
     {
       "name": "wf3b-page-reaches-fact-event",
       "claim": "The claim page reaches a fact's event through its own invocation (E5).",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "          COALESCE(b.outbox_id, fact_source.outbox_id),\n          COALESCE(b.domain_event_id, fact_source.domain_event_id),",
       "replacement": "          b.outbox_id,\n          COALESCE(b.domain_event_id, fact_source.domain_event_id),",
       "test": {
@@ -107,7 +107,7 @@
     {
       "name": "wf3b-scope-kind-by-event-type",
       "claim": "The trigger scope tells an engine fact run by its definition's event type, so loadRun re-derives it (E4).",
-      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "file": "db/migrations/0077_engine_fact_occurrences.sql",
       "original": "     AND c.kind = CASE d.event_type\n                    WHEN 'northstar.runtime:event.record-created' THEN 'created'\n                    WHEN 'northstar.runtime:event.record-transitioned' THEN 'transitioned'\n                    WHEN 'northstar.runtime:event.engine-fact-changed' THEN 'engineFact' END",
       "replacement": "     AND c.kind = CASE WHEN d.to_state IS NULL THEN 'created' ELSE 'transitioned' END",
       "test": {

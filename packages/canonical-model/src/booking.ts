@@ -352,7 +352,7 @@ export function bookingCatalogTerms(value: unknown): [unknown, unknown][] {
  * ADR-0073 A1 engineFactChanged (WORKFLOW-3 s1b). A commitment's state is a
  * Booking fact, not a declared record machine. Every state change ends in one
  * of Booking's two history writers, which name it (migration
- * 0077_booking_engine_facts.sql): one occurrence per commitment and revision,
+ * 0078_booking_engine_facts.sql): one occurrence per commitment and revision,
  * owned by the binding's owner record. A create (a new hold, or an import of a
  * confirmed or in-use commitment) is not a change and names nothing.
  */

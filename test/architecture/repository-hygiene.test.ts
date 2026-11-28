@@ -193,17 +193,18 @@ const suiteDefinitions = [
       'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
+      'test/postgres/open-items.test.ts',
       'test/postgres/order-lists-supply.test.ts',
       'test/postgres/order-lists.test.ts',
       'test/postgres/order-pages.test.ts',
       'test/postgres/packing-retrieval.test.ts',
+      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/payables.test.ts',
       'test/postgres/price-lists.test.ts',
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
-      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -294,6 +295,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
+      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/workflow-record-created.test.ts',
       'test/postgres/workflow-record-transitioned.test.ts',
     ],
@@ -319,14 +321,14 @@ const suiteDefinitions = [
   },
   {
     // SPEED-1: the page budget serves the composed application beside the
-    // commercial workflows. WORKFLOW-3 s1b: every general shard is at its
-    // budget, so the engine-fact journey runs in this job.
+    // commercial workflows.
     discoveryPattern:
-      '{test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization|workflow-engine-fact).test.ts,test/performance/page-budget.test.ts}',
+      '{test/postgres/**/@(commercial-totals|expected-receipts|open-items|payables|purchase-approvals|purchase-order-ending|receiving-authorization|workflow-engine-fact).test.ts,test/performance/page-budget.test.ts}',
     expectedFiles: [
       'test/performance/page-budget.test.ts',
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/expected-receipts.test.ts',
+      'test/postgres/open-items.test.ts',
       'test/postgres/payables.test.ts',
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',

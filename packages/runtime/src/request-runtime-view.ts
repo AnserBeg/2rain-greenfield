@@ -1,7 +1,5 @@
-import {
-  LINE_TOTALS_OPERATION_READER,
-  ROLLUP_QUERY_READER,
-} from '../../canonical-model/src/line-totals.js';
+import { ROLLUP_QUERY_READER } from '../../canonical-model/src/line-totals.js';
+import { OPEN_ITEM_OPERATION_READER } from '../../canonical-model/src/open-item.js';
 import { CONNECTOR_FAMILY } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
@@ -190,8 +188,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
     // 8 reads derived fields, create-only fields, money compared with zero
-    // and a totalled relation's maximum and header lock (ADR-0094).
-    maximumSupportedVersion: LINE_TOTALS_OPERATION_READER,
+    // and a totalled relation's maximum and header lock (ADR-0094); 9 an
+    // operation's open-item binding (OPEN-ITEM-1).
+    maximumSupportedVersion: OPEN_ITEM_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -265,7 +264,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (BILLING_RULES_READER, BILLING-1 s3a-i; assigned at TRAIN-X).
     // 55 reads the recordTransitioned workflow trigger member (ADR-0073 A1;
     // WORKFLOW-3 s1, assigned at TRAIN-Y).
-    // 56 reads the engineFactChanged workflow trigger member (ADR-0073 A1;
+    // 56 reads per-component billing timing: a recurring fixed fee in
+    // advance under keepPaidPeriod (BILLING_TIMING_READER, BILLING-1 s3a-ii;
+    // assigned at TRAIN-Z; request-runtime-view.test.ts pins it to the
+    // constant, which the name law keeps out of this generic file).
+    // 57 reads the engineFactChanged workflow trigger member (ADR-0073 A1;
     // WORKFLOW-3 s1b, provisional; assigned at merge).
     maximumSupportedVersion: ENGINE_FACT_TRIGGER_READER,
   },
