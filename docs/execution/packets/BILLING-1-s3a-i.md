@@ -3,7 +3,7 @@
 Status: built on packet/BILLING-1-s3a-i (base main 3c1c0c270; main 516f05ba9 merged once). Tier: **Critical** (money; rule 18). Stops: none. No migration.
 Design: BILLING-1-s3-design section 4 (s3a) and the BILLING-CALENDAR-TAX Fable read (lane A). B2 and B13 wait for the owner; nothing here needed them.
 Rung: surface reader 54 provisional (`BILLING_RULES_READER`) and calculation v4; the integrator renumbers. Rule 21(c): no preceding-binary proof; listed in FIRST-TENANT-OWED.md.
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46125888426
 Resume (2026-11-28): main 516f05ba9 merged once (guard baseline 4114 -> 4114, no rise). The merge put postgres-3 at 1161 s over its 1100 s budget, so catalog-extras moved to postgres-1 (postgres-3 1090 s, postgres-1 988 s). The first full run (46117587994, on 104fa4baf) red on two things: canonical-contracts-purity refused `.transform(` in canonical booking.ts (now validate, then an explicit truncation; billing-booking-microseconds re-pointed), and the inspection escalation browser spec had a fixed 2026-11-19 clock that left the 7-day backdate window (now the wall clock; it red on main too). Retry full run 46119665708 and its 42 controls (46119668150) on 41f365a58 were cancelled by the repository's transfer to rainerp-com (not a red; the retry is unspent). Run URLs before the transfer are under AnserBeg/2rain-greenfield.
 Fix round (Mythos pre-merge review FIX, findings 1-5 and R3): see Fix round below. Full run https://github.com/rainerp-com/2rain-greenfield/actions/runs/46125888426 and all 49 controls (https://github.com/rainerp-com/2rain-greenfield/actions/runs/46125891280) on 190c9a580.
 
