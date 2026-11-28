@@ -29,6 +29,38 @@ const UPDATE = /UPDATE\s+(?:north_star_module\.|\$\{)/giu;
  */
 const UPSERT =
   /INSERT\s+INTO\s+(?:north_star_module\.|\$\{)[^`;]*?ON\s+CONFLICT\b[^`;]*?DO\s+UPDATE\s+SET/giu;
+/** Every ON CONFLICT DO UPDATE, whatever its target (s1b review finding 1). */
+const DO_UPDATE = /DO\s+UPDATE\s+SET/giu;
+/**
+ * Upserts the managed-table pattern above does not count, each with what it
+ * writes: platform and internal tables, or a managed balance projection whose
+ * table name is a format placeholder. None writes a machine state column.
+ */
+export const OTHER_UPSERTS: Readonly<
+  Record<string, { readonly count: number; readonly reason: string }>
+> = Object.freeze({
+  'packages/postgres-provider/src/composed-application-runtime.ts': {
+    count: 5,
+    reason: 'Tenant, environment and local demo policy rows (platform tables).',
+  },
+  'packages/postgres-provider/src/customization-service.ts': {
+    count: 1,
+    reason: 'An upgrade refusal row (platform table).',
+  },
+  'packages/postgres-provider/src/module-storage-materializer.ts': {
+    count: 4,
+    reason:
+      'Attempt claims, backfill checkpoints and reference counts (internal tables), and the balance projection rebuild written through a %s table placeholder.',
+  },
+  'packages/postgres-provider/src/workflow-consumer.ts': {
+    count: 1,
+    reason: 'A receipt scan position (platform table).',
+  },
+  'apps/api/src/staff-identity.ts': {
+    count: 1,
+    reason: 'A staff ceremony row (platform table).',
+  },
+});
 /** A machine's derived state field named in source (s1 review finding 2). */
 const MACHINE_LITERAL =
   /derived_state_field\.machine\.(?:([a-z][a-z0-9_]*)|\$\{spec\.entities\.order\}_lifecycle)/gu;
@@ -227,6 +259,43 @@ test('every UPDATE or upsert of a managed table is classified by the machines it
         /only read/u,
         `${path} names a machine state field: list the machines it moves`,
       );
+  }
+});
+
+test('every ON CONFLICT DO UPDATE is a counted managed upsert or a listed other upsert', () => {
+  const found: Record<string, number> = {};
+  for (const path of [...sources('packages'), ...sources('apps')]) {
+    const count = readFileSync(path, 'utf8').match(DO_UPDATE)?.length ?? 0;
+    if (count) found[path.replaceAll('\\', '/')] = count;
+  }
+  const expected: Record<string, number> = {};
+  for (const [path, writer] of Object.entries(RECORD_STATE_WRITERS))
+    if (writer.upserts) expected[path] = writer.upserts;
+  for (const [path, other] of Object.entries(OTHER_UPSERTS))
+    expected[path] = (expected[path] ?? 0) + other.count;
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(found).sort()),
+    Object.fromEntries(Object.entries(expected).sort()),
+    'an upsert the managed-table pattern cannot see was added: count it or list it in OTHER_UPSERTS',
+  );
+});
+
+// s1b review finding 2, partly: a literal state field inside a write
+// statement reds; a state column passed through a variable is still only the
+// reason's word (named in the packet record).
+test('a writer that only reads a machine writes no state field in an UPDATE or upsert', () => {
+  for (const [path, writer] of Object.entries(RECORD_STATE_WRITERS)) {
+    if (writer.machines || writer.names) continue;
+    const text = readFileSync(path, 'utf8');
+    for (const machine of namedMachines(text))
+      for (const statement of text.match(
+        /(?:UPDATE\s+(?:north_star_module\.|\$\{)|ON\s+CONFLICT\b)[^`;]*/giu,
+      ) ?? [])
+        assert.doesNotMatch(
+          statement,
+          new RegExp(`derived_state_field\\.machine\\.${machine}\\b`, 'u'),
+          `${path} writes ${machine}'s state in a statement it says only reads`,
+        );
   }
 });
 
