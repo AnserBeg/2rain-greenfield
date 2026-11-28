@@ -142,7 +142,7 @@ test('DOCUMENT-POSTING: Customize cannot unfreeze a posted document; the compile
             schemaVersion: 'v6',
             targetId: id('state', 'bookkeeping_draft_state_ready'),
           },
-        });
+        } as never);
       },
       'postedReachable',
     ],

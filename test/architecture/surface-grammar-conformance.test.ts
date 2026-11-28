@@ -318,8 +318,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
   // APPROVALS' approval requests and settings (five), + SALES-EXTRAS' price
   // list, its prices and customers (nine) and its Counter sales worklist
-  // (one; INTEGRATION, decision I-M8(a)), + LOOP-1's Today launcher.
-  assert.equal(groupedManifest.surfaces.length, 124);
+  // (one; INTEGRATION, decision I-M8(a)), + LOOP-1's Today launcher, +
+  // DOCUMENT-POSTING's journal draft and its lines (six).
+  assert.equal(groupedManifest.surfaces.length, 130);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,

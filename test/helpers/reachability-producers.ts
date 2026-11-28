@@ -86,6 +86,7 @@ export const reachabilityProducers = [
     'test/compiler/compiler-semantic-profile.test.ts',
     'test/compiler/determinism.test.ts',
     'test/compiler/disclosure-tier-projection.test.ts',
+    'test/compiler/document-posting.test.ts',
     'test/compiler/field-kind-projection.test.ts',
     'test/compiler/freeze-b.test.ts',
     'test/compiler/g2-module-conformance.test.ts',
@@ -135,7 +136,7 @@ export const reachabilityProducers = [
     'test/postgres/presentation-list.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|ledger-books-by-hand|ledger-journal-core|line-logical-fields|line-totals|locations|logical-fields|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|presentation-list|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
+    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|ledger-books-by-hand|ledger-document-post|ledger-journal-core|line-logical-fields|line-totals|locations|logical-fields|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|presentation-list|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-live.test.ts',
@@ -180,6 +181,7 @@ export const reachabilityProducers = [
     'test/postgres/declared-list.test.ts',
     'test/postgres/document-numbering.test.ts',
     'test/postgres/ledger-books-by-hand.test.ts',
+    'test/postgres/ledger-document-post.test.ts',
     'test/postgres/ledger-journal-core.test.ts',
     'test/postgres/line-logical-fields.test.ts',
     'test/postgres/module-storage-transition.test.ts',

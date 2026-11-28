@@ -87,6 +87,7 @@ const suiteDefinitions = [
       'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
       'test/compiler/disclosure-tier-projection.test.ts',
+      'test/compiler/document-posting.test.ts',
       'test/compiler/field-kind-projection.test.ts',
       'test/compiler/freeze-b.test.ts',
       'test/compiler/g2-module-conformance.test.ts',

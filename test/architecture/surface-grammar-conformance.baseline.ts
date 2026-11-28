@@ -113,11 +113,11 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     moduleId: 'northstar.bookkeeping:module.bookkeeping_books',
     packageId: 'northstar.bookkeeping:package.bookkeeping_books',
     sourceDirectory: 'bookkeeping',
-    // MEASURED from the composed release (ACCOUNTING-1 1a-ii). Books declares
-    // no surface of its own (its books-start Task sits on Inventory's company
-    // record page), so the 6 are the empty module's: SG001 (zero surfaces)
-    // and SG002 for each of the five archetypes. They close when Books
-    // declares its first screens (the 1a-iv read models).
-    violationCount: 6,
+    // MEASURED from the composed release (DOCUMENT-POSTING slice 1, was 6 at
+    // ACCOUNTING-1 1a-ii when Books declared no surface). Books now declares
+    // the journal draft and its lines with the standard list, detail and form
+    // surfaces each, the same generic surface shape (and debt) as Location's
+    // entity, which measures 13 for one entity.
+    violationCount: 23,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);
