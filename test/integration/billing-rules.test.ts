@@ -2307,3 +2307,28 @@ test('B2: a use leg cannot carry the reserved committed identity (review finding
     /reserved identity/,
   );
 });
+
+test('B2 minimum: a term never shrinks a cycle already opened and billed (ruled 2026-11-28)', () => {
+  // Returned Sep 5, inside the term's last cycle: September opened on Sep 1
+  // and keepPaidPeriod keeps it whole, with or without the term. 1110.00.
+  const asOf = '2027-09-15T06:00:00.000Z';
+  const returned = '2027-09-05T06:00:00.000Z';
+  const whole = [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '30000'],
+    ['rent', september, '30000'],
+  ];
+  for (const components of [[termFee(advance)], undefined])
+    assert.deepEqual(
+      reviewLines(
+        useReview(
+          asOf,
+          returned,
+          undefined,
+          advancePlan({ source: 'use', ...(components && { components }) }),
+        ),
+      ),
+      whole,
+    );
+});

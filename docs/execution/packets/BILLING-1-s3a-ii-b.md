@@ -46,7 +46,7 @@ CI tier: pending full
 1. Money, under-bill. Setup: a fee `minimumTerm`, with `earlyReturn.bill: agreedEnd` and an agreed end inside the term. The cycle that opens between the return and the held agreed end was rated on the committed interval alone, so it lost the term. Figures: 783.87 instead of 900.00; August 183.87 instead of 300.00. Fixed: that cycle is rated on the committed interval united with the binding term. New control: billing-term-after-return.
 2. A use leg carrying the reserved committed identity could pose as a hold. `serviceUseCoverage` now refuses it, with a test.
 3. Note, recorded for slice (e). `committedFrom` is the earliest committed start across bands. This is unreachable on the served path, which has one band and one committed interval.
-4. Owner note, recorded in ADR-0083. A return inside the term's last cycle on an open-ended agreement bills that cycle whole under keepPaidPeriod, in both term forms and with no term: E1m returned Sep 5 gives 1,110.00. Here "never more" meets keepPaidPeriod, and no one has ruled on it.
+4. A return inside the term's last cycle on an open-ended agreement bills that cycle whole under keepPaidPeriod, in both term forms and with no term: E1m returned Sep 5 gives 1,110.00. RULED correct as is (orchestrator, 2026-11-28): a term never shrinks a cycle already opened and billed. Recorded in ADR-0083 and pinned by the test "a term never shrinks a cycle already opened and billed".
 The first full run (46174010578, at 6c7a796db) was cancelled for the fix, not red. Its controls (46174014379, 18/18 green) ran at input ref 6c7a796db3613e6fe1b5186604074b4866ca5228.
 
 ## Owed
