@@ -1,5 +1,29 @@
 # OPEN-ITEM-1 · The order-free open-item core
 
+## Slice 2 · Void, unapply, credit notes, and s1's owed notes — record
+Status: built (thin path: void, unapply, a credit note applied beside a receipt, the four owed notes); Critical (money, rule 24): one Mythos silent-harm review in parallel with CI. Branch `packet/OPEN-ITEM-1-s2`, cut from `origin/main` 8104e7498 (TRAIN-Z). Floor: operation catalog 9 -> 10 (`OPEN_ITEM_OPERATION_READER`). No migration (0076's grant check already admits any `northstar.openitem` capability; the receipt check holds because each change document names `input.recordId`). Stops taken: one, reported (per-target change documents, below).
+
+CI tier: pending
+
+**Claims.**
+1. Declarations: an open item may name `void {operationId, transitionId}` (the machine's open -> void transition); an application type may name `unapplyOperationId`. Both refuse unless person-confirmed core operations of their capability (`open_item_void`, `open_item_unapply`) reading back the item or application type.
+2. Ledgers: every apply, void and unapply binding carries, for each end, the item type's ledger: every application type naming that type at that end. An item's applied is the live sum across ALL of them, so a credit note and a receipt settle one fee note under one balance; s1's single-type gate refused that (`appliedDiverged`).
+3. Void: grant, policy epoch, counterparty lock, item row (apply's order); refused unless the revision holds and the item is open with stored applied 0 and a live ledger sum 0. Writes state void and balance 0 (nothing owed; total and number kept). A void racing an apply: exactly one succeeds.
+4. Unapply: input recordId is the SOURCE, arguments name application IDs. Targets and company come from the STORED lines (prepare and again under the locks); counterparty, items sorted by record ID, then the lines FOR NO KEY UPDATE (after the items, as apply's inserts are). Refused for a line not live, of another source, or of another company. Lines are archived (kept); amounts return to source and targets; state from figures (applied 0 -> open, balance 0 -> settled, else partially settled); the ledger gate re-reads every touched item.
+5. Owed notes: (a) a required link on an application type other than its two ends refuses at compile; (c) named reds for currencyMissing, policyChanged, isolationUnsupported and directionMismatch, and compile refusals asserted by reason; (d) a policy version the live policy did not issue refuses `openItem.policyUnverifiable` (fail closed, not the interpreter's skip). Direction is now checked in prepare, on the binding, before any read.
+
+**Rule 17.** (a) Withdrawing a document nothing is applied to, and withdrawing an amount moved between two documents: general to any open item. (b) Unchanged users: rental and clinic invoices voided before payment, a bounced payment unapplied, a supplier credit note applied to bills, a refund against a credit. (c) Narrower: void only from open (a zero-total item issued straight to settled cannot be voided); unapply takes whole lines (no partial unapply of one line).
+
+**Decisions.**
+- Unapply archives the application line instead of writing a reversing line (note §4). A reversing line needs a negative amount (amendment 5 forbids it) or a new declared role; s1's sums already count only live lines. The reversal fact is the line's archived_at and revision, the source's change document and the invocation (metadata lists the unapplied lines).
+- Credit notes are the existing role on a separate credit-side type with its own series (owner: credits are separate documents), applied through their own application type; no new role.
+- STOP (rule 16) on per-target change documents: `trust_business_change_documents` is UNIQUE on (tenant, environment, invocation_id), the invocation row holds one `change_document_id`, and `AcceptedMutationCommand` carries one `change`. A change document per target is a trust-substrate change (Critical, needs a design read) or a core-owned per-target evidence table. Not built; targets still ride the source's change in metadata.
+- Not built (remains): note (b), a Customize member declaring the role (rule 12: drafting support and eval cases), which also makes an application type's name optional; the event consumer.
+
+**Controls** (`test/evidence/OPEN-ITEM-1-s2.expected-red.json`, 6 silent-harm entries): void balance, unapply state, policy changed, isolation, currency missing, direction. Void-only-from-open, unapply's own-source and live-once checks each have a second layer (state plus applied; prepare plus the locked re-read; the ledger gate), so they have reds but no single-layer control.
+
+**Test it yourself.** Read the s2 subtests in `test/postgres/open-items.test.ts`: a 15.00 fee note voided keeps FN-number and owes 0.00; a 100.00 note part-paid 30.00 by a receipt takes a 50.00 credit note CN-000001 (applied 80.00, balance 20.00), and a second 30.00 credit note is refused; unapplying the credit note brings it back to 30.00 / 70.00.
+
 ## Slice 1 · Draft -> issue (numbered per company) -> one payment applied, two companies — record
 Status: built to the thin first slice of the design read (`OPEN-ITEM-1-core-v2-design-read.result.txt`, APPROVE WITH AMENDMENTS) over design note `notes/OPEN-ITEM-1-core-v2`; Critical (money, rule 24): one Mythos silent-harm review in parallel with CI. Branch `packet/OPEN-ITEM-1-s1`, cut from `origin/main` 63826f6c0 (TRAIN-X). Floor: operation catalog 8 -> 9 (`OPEN_ITEM_OPERATION_READER`; kept at TRAIN-Z, where main's operation maximum is 8). Migration `0076_open_items.sql` (provisional 0075; renamed at TRAIN-Z because main's 0075 is WORKFLOW-3 s1's `0075_record_transition_occurrences.sql`). Stops taken: none.
 

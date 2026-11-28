@@ -17,6 +17,7 @@ import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composi
 import {
   OPEN_ITEM_APPLY_CAPABILITY,
   openItemLineSetDigest,
+  type OpenItemOperationBinding,
 } from '../../packages/canonical-model/src/index.js';
 import { createComposedApplicationRuntime } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import type { PostgresCapabilityOperationExecutorContext } from '../../packages/postgres-provider/src/capability-operation-executor-factory.js';
@@ -179,7 +180,8 @@ async function run(
   const stored = async (kind: Kind, recordId: string) => {
     const entity =
       kind === 'fee_note' ? NOTE : kind === 'receipt' ? RECEIPT : CREDIT;
-    const f = kind === 'fee_note' ? note : kind === 'receipt' ? receipt : credit;
+    const f =
+      kind === 'fee_note' ? note : kind === 'receipt' ? receipt : credit;
     const p = physical(entity);
     const row = (
       await pool.query<Record<string, string | null>>(
@@ -225,7 +227,7 @@ async function run(
     const p = physical(entity);
     return (
       await pool.query<{ sum: string }>(
-        `SELECT coalesce(sum(${p.column(amount)}), 0)::text AS sum FROM ${p.table}
+        `SELECT coalesce(sum(${p.column(amount)}), 0.00)::text AS sum FROM ${p.table}
           WHERE (tenant_id, environment_id) = ($1,$2) AND ${p.relation(end)} = $3 AND archived_at IS NULL`,
         [tenant, environment, recordId],
       )
@@ -1023,6 +1025,7 @@ async function run(
       assert.deepEqual(
         [cleared.applied, cleared.balance, cleared.state],
         ['0.00', '100.00', 'open'],
+        'a fully unapplied fee note did not return to open',
       );
       assert.deepEqual(
         [
@@ -1107,15 +1110,21 @@ async function run(
   await t.test(
     'named refusals: currency missing, policy changed, isolation, direction mismatch',
     async () => {
-      // A stored source with no currency settles nothing.
+      // Two stored items with no currency are not one currency: absent
+      // never equals absent.
       const target = await issuedNote('10.00');
       const blank = await issuedReceipt('10.00');
-      const r = physical(RECEIPT);
-      await pool.query(
-        `UPDATE ${r.table} SET ${r.column(receipt('currency'))} = ''
-          WHERE (tenant_id, environment_id, record_id) = ($1,$2,$3)`,
-        [tenant, environment, blank],
-      );
+      for (const [entity, fieldId, recordId] of [
+        [RECEIPT, receipt('currency'), blank],
+        [NOTE, note('currency'), target],
+      ] as const) {
+        const p = physical(entity);
+        await pool.query(
+          `UPDATE ${p.table} SET ${p.column(fieldId)} = ''
+            WHERE (tenant_id, environment_id, record_id) = ($1,$2,$3)`,
+          [tenant, environment, recordId],
+        );
+      }
       const noCurrency = await apply(blank, [{ target, amount: '10.00' }]);
       assert.match(
         noCurrency,
@@ -1190,7 +1199,9 @@ async function run(
           )!,
         ),
       );
-      const binding = definition.openItem!;
+      const binding = (
+        definition as { readonly openItem?: OpenItemOperationBinding }
+      ).openItem!;
       assert.equal(binding.bindingVersion, 'openItem.apply/v1');
       if (binding.bindingVersion !== 'openItem.apply/v1') return;
       const applyFactory = OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES.find(
@@ -1198,7 +1209,11 @@ async function run(
       )!;
       const executor = applyFactory.create({
         projection: () => ({
-          payload: { kind: 'storageTargetPayload', entities: [], relations: [] },
+          payload: {
+            kind: 'storageTargetPayload',
+            entities: [],
+            relations: [],
+          },
         }),
       } as unknown as PostgresCapabilityOperationExecutorContext);
       const crossed = await executor
@@ -1244,36 +1259,33 @@ async function run(
     },
   );
 
-  await t.test(
-    'compile refusals name their reason',
-    () => {
-      const reasons = (options: Parameters<typeof openItemAuthored>[0]) => {
-        const { authored, bindings } = openItemAuthored(options);
-        const compiled = compileOpenItems(authored, bindings);
-        return compiled.status === 'compiled'
-          ? 'compiled'
-          : JSON.stringify(compiled.diagnostics);
-      };
-      assert.match(
-        reasons({ requiredApplicationLink: true }),
-        /every other link is optional/u,
-        'a required link the core never writes compiled on an application type',
-      );
-      assert.match(
-        reasons({ requiredApplicationName: true }),
-        /every other field is optional/u,
-        'a required field the core never writes compiled on an application type',
-      );
-      assert.match(
-        reasons({ genericIssue: true }),
-        /Only the open-item core moves/u,
-      );
-      assert.match(
-        reasons({ payableReceipt: true }),
-        /stays within one direction/u,
-      );
-    },
-  );
+  await t.test('compile refusals name their reason', () => {
+    const reasons = (options: Parameters<typeof openItemAuthored>[0]) => {
+      const { authored, bindings } = openItemAuthored(options);
+      const compiled = compileOpenItems(authored, bindings);
+      return compiled.status === 'compiled'
+        ? 'compiled'
+        : JSON.stringify(compiled.diagnostics);
+    };
+    assert.match(
+      reasons({ requiredApplicationLink: true }),
+      /every other link is optional/u,
+      'a required link the core never writes compiled on an application type',
+    );
+    assert.match(
+      reasons({ requiredApplicationName: true }),
+      /every other field is optional/u,
+      'a required field the core never writes compiled on an application type',
+    );
+    assert.match(
+      reasons({ genericIssue: true }),
+      /Only the open-item core moves/u,
+    );
+    assert.match(
+      reasons({ payableReceipt: true }),
+      /stays within one direction/u,
+    );
+  });
 }
 
 interface StoragePlan {

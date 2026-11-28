@@ -44,8 +44,7 @@ export interface OpenItemDeclaration {
    * from open to void, moved only by the core. It keeps its number.
    */
   readonly void?:
-    | { readonly operationId: string; readonly transitionId: string }
-    | undefined;
+    { readonly operationId: string; readonly transitionId: string } | undefined;
 }
 
 export interface OpenItemApplicationDeclaration {

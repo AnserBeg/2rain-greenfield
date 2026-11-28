@@ -59,9 +59,9 @@ export const line = (local: string) => field(`fee_note_lines_${local}`);
 export const receipt = (local: string) => field(`receipt_${local}`);
 export const applied = (local: string) => field(`receipt_application_${local}`);
 export const credit = (local: string) => field(`credit_note_${local}`);
-export const creditLine = (local: string) => field(`credit_note_lines_${local}`);
-export const credited = (local: string) =>
-  field(`credit_application_${local}`);
+export const creditLine = (local: string) =>
+  field(`credit_note_lines_${local}`);
+export const credited = (local: string) => field(`credit_application_${local}`);
 export const NOTE_ACCOUNT = relation('fee_note_account');
 export const NOTE_LINES_PARENT = relation('fee_note_lines_parent');
 export const RECEIPT_ACCOUNT = relation('receipt_account');
@@ -435,8 +435,7 @@ export function openItemAuthored(options: OpenItemOptions = {}): {
     // Only the core writes an application, so its name is optional.
     if (!(options.requiredApplicationName && local === 'receipt_application'))
       authored.fields.find(
-        (entry: Authored) =>
-          entry.fieldId === field(`${local}_name`),
+        (entry: Authored) => entry.fieldId === field(`${local}_name`),
       ).presence = 'optional';
     // The type is capability owned: its create becomes the apply, its
     // archive the unapply, and its other generic writes go.

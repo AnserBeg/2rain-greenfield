@@ -157,7 +157,7 @@
         "subscriptions"
       ],
       "adr": null,
-      "adrNote": "OPEN-ITEM-1 slice 1: the order-free open-item core (design note notes/OPEN-ITEM-1-core-v2 and its binding read; the ADR follows with the receivable and payable adoption). Its names are its own capability IDs (northstar.openitem:capability.open_item_issue and open_item_apply) and the openItem declaration keys: engine vocabulary, not first-party vocabulary.",
+      "adrNote": "OPEN-ITEM-1 slice 1: the order-free open-item core (design note notes/OPEN-ITEM-1-core-v2 and its binding read; the ADR follows with the receivable and payable adoption). Its names are its own capability IDs (northstar.openitem:capability.open_item_issue, open_item_apply, open_item_void and open_item_unapply; void and unapply from slice 2) and the openItem declaration keys: engine vocabulary, not first-party vocabulary.",
       "files": [
         "packages/postgres-provider/src/open-item-capability-executor.ts",
         "packages/canonical-model/src/open-item.ts",

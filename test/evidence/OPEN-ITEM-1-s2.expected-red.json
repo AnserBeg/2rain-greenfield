@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "packet": "OPEN-ITEM-1-s2",
+  "entries": [
+    {
+      "name": "open-item-s2-void-balance",
+      "claim": "Nothing is owed on a void item: void writes its balance to zero.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          [balanceColumn, zero],\n          [stateColumn, states.void],",
+      "replacement": "          [stateColumn, states.void],",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "void: an open item with nothing applied is voided and keeps its number; an applied one is refused",
+          "expected": "a voided fee note still owes its balance"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s2-unapply-state",
+      "claim": "An unapply moves each item's state from its figures: nothing applied is open again.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          applied === 0n\n            ? b.states.open",
+      "replacement": "          applied === 0n\n            ? b.states.settled",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "unapply returns the amounts to both ends; a line is unapplied once, by its own source",
+          "expected": "a fully unapplied fee note did not return to open"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s2-policy-changed",
+      "claim": "A permission or membership revoked after the gateway decided refuses the money write.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          return refused('openItem.policyChanged');",
+      "replacement": "          void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "named refusals: currency missing, policy changed, isolation, direction mismatch",
+          "expected": "an issue ran under a policy that moved after the decision"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s2-isolation",
+      "claim": "A grant is consumed only under READ COMMITTED, which the line freeze depends on.",
+      "file": "db/migrations/0076_open_items.sql",
+      "original": "  IF current_setting('transaction_isolation') <> 'read committed' THEN\n    RAISE EXCEPTION 'openItem.isolationUnsupported'; END IF;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "named refusals: currency missing, policy changed, isolation, direction mismatch",
+          "expected": "a grant was consumed outside READ COMMITTED"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s2-currency-missing",
+      "claim": "Two items with no stored currency never settle each other as one currency.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "        return refused('openItem.currencyMissing');",
+      "replacement": "        void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "named refusals: currency missing, policy changed, isolation, direction mismatch",
+          "expected": "a receipt with no stored currency was applied"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s2-direction",
+      "claim": "At run time an amount moves only within one direction, credit side to debit side.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "      return refused('openItem.directionMismatch');",
+      "replacement": "      void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "named refusals: currency missing, policy changed, isolation, direction mismatch",
+          "expected": "a receivable item could be settled by a payable item at run time"
+        }
+      ]
+    }
+  ]
+}
