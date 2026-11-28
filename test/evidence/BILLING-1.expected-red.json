@@ -988,7 +988,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time",
-          "expected": "TBD"
+          "expected": "\\+ +'0'\\n- +'21000'"
         }
       ]
     },
@@ -1009,12 +1009,12 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it",
-          "expected": "TBD"
+          "expected": "\\+ +'11129'\\n- +'30000'"
         },
         {
           "file": "test/postgres/billing-terms.test.ts",
           "name": "an advance fee bills its opened cycles on the agreed interval through the released quote query, and an early return keeps them",
-          "expected": "TBD"
+          "expected": "- +'3000'"
         }
       ]
     },
@@ -1032,7 +1032,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: an opened advance cycle is not rated again when it closes",
-          "expected": "TBD"
+          "expected": "\\+ +'0'\\n- +'30000'"
         }
       ]
     },
@@ -1050,7 +1050,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: keepPaidPeriod keeps an opened cycle whole after an early end, and no cycle opens after it",
-          "expected": "TBD"
+          "expected": "'2027-08-01T06:00:00.000Z',\\n\\+ +'30000'"
         }
       ]
     },
@@ -1068,7 +1068,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: a late first review still owes every opened cycle",
-          "expected": "TBD"
+          "expected": "\\+ \\[\\]\\n- \\["
         }
       ]
     },
@@ -1086,7 +1086,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: arrears fees and one-offs in an advance plan stay closed-cycle only",
-          "expected": "TBD"
+          "expected": "\\+ +'fuel',"
         }
       ]
     },
@@ -1104,7 +1104,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
-          "expected": "TBD"
+          "expected": "an unstated recurring fee beside a timed one"
         }
       ]
     },
@@ -1122,7 +1122,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
-          "expected": "TBD"
+          "expected": "advance with a suspending pause: absent"
         }
       ]
     },
@@ -1140,7 +1140,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: timing refusals (unstated, suspend, prorateAndRefund, advance outside a recurring fee)",
-          "expected": "TBD"
+          "expected": "advance on a time component"
         }
       ]
     },
@@ -1158,7 +1158,7 @@
         {
           "file": "test/integration/billing-rules.test.ts",
           "name": "B2: timing selects calculation v5 and the timing reader; plans without it keep their bytes",
-          "expected": "TBD"
+          "expected": "Billing replay digest mismatch"
         }
       ]
     }
