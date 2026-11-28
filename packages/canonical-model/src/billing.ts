@@ -41,6 +41,13 @@ const civilPeriod = z.enum(['day', 'week', 'fourWeek', 'month']);
 const proration = z.enum(['activeCoverage', 'none']);
 const periodSlots = z.partialRecord(period, id);
 const term = z.strictObject({ period, count: z.int().min(1).max(744) });
+// B13: a discount reduces the base of its own line (after the minimum and
+// the cap, before tax); the line stores the net, the discount is evidence.
+// The rate names a percentage slot, so per-customer and price-list discounts
+// come from the ordinary override tables. Absent, never null, when unused.
+const discount = z
+  .strictObject({ kind: z.literal('percent'), rate: id, reason: id })
+  .optional();
 const common = { id, taxClassification: id };
 // B2. Absent means arrears, so v2-v4 bytes replay unchanged; a plan that
 // states timing on any component states it on every time and recurring fixed
@@ -111,6 +118,7 @@ const component = z.discriminatedUnion('kind', [
     // under prorate.
     partial: z.partialRecord(period, z.enum(['whole', 'prorate'])).optional(),
     timing,
+    discount,
   }),
   z.strictObject({
     ...common,
@@ -125,6 +133,7 @@ const component = z.discriminatedUnion('kind', [
     // service ends before the term has elapsed, the fee for the cycles up to
     // the term's end falls due at the service end. Recurring fees only.
     minimumTerm: term.optional(),
+    discount,
     occurrence: z.discriminatedUnion('kind', [
       z.strictObject({
         kind: z.literal('oneOff'),
@@ -146,6 +155,7 @@ const component = z.discriminatedUnion('kind', [
     unit: id,
     overageRate: id,
     allowanceProration: proration.optional(),
+    discount,
     allowanceBasis: z.discriminatedUnion('kind', [
       z.strictObject({ kind: z.literal('perCycle'), quantity: id }),
       z.strictObject({ kind: z.literal('perPricingWindow'), quantity: id }),
@@ -155,6 +165,17 @@ const component = z.discriminatedUnion('kind', [
         quantities: periodSlots,
       }),
     ]),
+  }),
+  // The reserved percentage row (ADR-0083): a rate on one earlier
+  // component's line, before tax. gross is that line after its minimum, cap,
+  // proration and quantity; net is after its discount. No default stage, and
+  // tax is never a base. It mirrors its base's occurrences and timing.
+  z.strictObject({
+    ...common,
+    kind: z.literal('percentage'),
+    stage: z.literal('afterCapBeforeTax'),
+    rate: id,
+    base: z.strictObject({ componentId: id, stage: z.enum(['gross', 'net']) }),
   }),
 ]);
 export const BillingPlanSchema = z
@@ -311,7 +332,14 @@ export const BillingPlanSchema = z
         )
           issue('partialTime is replaced by partial under a combination');
       } else if (c.kind === 'fixed') check(c.amount);
-      else {
+      else if (c.kind === 'percentage') {
+        check(c.rate, 'percentage');
+        const base = plan.components.find((b) => b.id === c.base.componentId);
+        // One earlier-stage base: never itself, another percentage or tax.
+        if (!base || base.kind === 'percentage')
+          issue('A percentage names one non-percentage component as its base');
+        continue;
+      } else {
         check(c.overageRate);
         const basis = c.allowanceBasis;
         if (basis.kind === 'perBilledPeriod') {
@@ -328,6 +356,7 @@ export const BillingPlanSchema = z
             check(ref, { unit: c.unit });
         } else check(basis.quantity, { unit: c.unit });
       }
+      if (c.discount) check(c.discount.rate, 'percentage');
     }
     if (used.size !== slots.size) issue('Unused or unknown billing slots');
     // Calculation v5 (B2 timing, then the s3a-ii-b pricing keys). Only a
@@ -337,7 +366,7 @@ export const BillingPlanSchema = z
       const arrears = plan.bindings?.arrearsSource;
       const source = arrears?.kind;
       for (const c of plan.components) {
-        if (c.kind === 'meter') continue;
+        if (c.kind === 'meter' || c.kind === 'percentage') continue;
         if (c.kind === 'time' && c.minimumDuration)
           minimumFits(c.minimumDuration, plan.pricingWindow ?? 'month');
         const t = c.timing;

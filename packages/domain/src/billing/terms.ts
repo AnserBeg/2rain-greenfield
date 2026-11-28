@@ -7,7 +7,7 @@ import {
   type BillingRateTable,
 } from '../../../canonical-model/src/billing.js';
 import { instant } from './calendar.js';
-import { decimal } from './fraction.js';
+import { decimal, integer } from './fraction.js';
 import { capValue } from './cover.js';
 
 export const digest = (v: unknown) => canonicalizeAndHash(v).contentHash;
@@ -33,6 +33,10 @@ export function publishRateTable(plan: BillingPlan, input: unknown) {
     if (value === undefined || (value.split('.')[1]?.length ?? 0) > slot.scale)
       throw new Error('Missing or unrepresentable price slot ' + slot.id);
     decimal(value);
+    // A percentage above 100 would make a discount's net negative. Checked
+    // here, the one validator every publish, override and quote shares.
+    if (slot.kind === 'percentage' && decimal(value).compare(integer(100)) > 0)
+      throw new Error('A percentage above 100 in slot ' + slot.id);
   }
   for (const c of plan.components)
     if (

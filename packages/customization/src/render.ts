@@ -158,6 +158,8 @@ export function renderReleaseDiff(input: {
               (c.minimumTerm
                 ? ` Minimum term ${c.minimumTerm.count} ${c.minimumTerm.period} from the agreed start.`
                 : '');
+      } else if (c.kind === 'percentage') {
+        terms = `Charge “${c.rate}” percent of component “${c.base.componentId}” at its ${c.base.stage} amount, before tax.`;
       } else {
         const basis = c.allowanceBasis;
         const allowance =
@@ -168,6 +170,8 @@ export function renderReleaseDiff(input: {
             : basis.quantity;
         terms = `Stream “${c.streamId}” in ${c.unit} with allowance “${allowance}” ${basis.kind} and overage rate “${c.overageRate}”. Allowance proration ${c.allowanceProration}.`;
       }
+      if (c.kind !== 'percentage' && c.discount)
+        terms += ` Discount “${c.discount.rate}” percent (reason ${c.discount.reason}) after the minimum and cap.`;
       lines.push(
         `Component “${c.id}”. ${terms} Tax classification “${c.taxClassification}”.`,
       );

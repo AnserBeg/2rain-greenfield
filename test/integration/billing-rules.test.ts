@@ -1858,3 +1858,274 @@ test('B2 minimum: the early-return term form charges exactly the term too (slice
     ['rent', july, '30000'],
   ]);
 });
+
+// ---- BILLING-1 slice 3a-ii-b: percent discounts (B13) and percentage components ----
+const off = { kind: 'percent', rate: 'off', reason: 'loyalty' } as const;
+const arrearsTiming = { when: 'arrears' } as const;
+function slotList(money: string[], percent: string[]) {
+  return [
+    ...money.map((id) => ({ id, kind: 'money', currency: 'CAD', scale: 2 })),
+    ...percent.map((id) => ({ id, kind: 'percentage', scale: 2 })),
+  ];
+}
+// E3: CAD 30 a day or 100 a week, four-week window, cap 240, 10% off.
+function e3Plan(extra: Authored[] = [], percent: string[] = ['off']) {
+  const base = timePlan({ cap: 'cap', discount: off, timing: arrearsTiming });
+  return {
+    ...base,
+    pricingWindow: 'fourWeek',
+    slots: slotList(['d', 'w', 'cap'], percent),
+    components: [...base.components, ...extra],
+  };
+}
+const e3Values = { d: '30', w: '100', cap: '240', off: '10' };
+function quoteLines(
+  planInput: unknown,
+  days: number,
+  values: Record<string, string>,
+) {
+  const quote = quoteBillingService(
+    planInput,
+    evidence(planInput, days, values),
+  );
+  assert.equal(quote.algorithm, BILLING_TIMING_CALCULATION);
+  assert.equal(replayBillingQuote(quote).resultDigest, quote.resultDigest);
+  return quote.lines;
+}
+
+test('B13: a percent discount applies after the minimum and the cap (E3)', () => {
+  const [day7] = quoteLines(e3Plan(), 7, e3Values);
+  assert.equal(day7!.differenceCents, '9000');
+  assert.deepEqual(day7!.discount, {
+    kind: 'percent',
+    reason: 'loyalty',
+    grossExact: '100',
+    discountExact: '10',
+    grossCents: '10000',
+    discountCents: '1000',
+  });
+  // Day 20: best cover 300, capped 240, 10% off: 216.00 (126.00 after the 90.00).
+  const [day20] = quoteLines(e3Plan(), 20, e3Values);
+  assert.equal(day20!.differenceCents, '21600');
+  assert.equal(day20!.discount?.grossCents, '24000');
+  assert.equal(day20!.discount?.discountCents, '2400');
+  // Each window's rate is evidence in the derivation.
+  assert.equal(
+    (day20!.derivation[0] as { discountRate: string }).discountRate,
+    '10',
+  );
+  // The cover is chosen on undiscounted prices: the same blocks either way.
+  const plain = quoteLines(e3Plan(), 20, { ...e3Values, off: '0' })[0]!;
+  assert.deepEqual(
+    (plain.derivation[0] as { blocks: unknown }).blocks,
+    (day20!.derivation[0] as { blocks: unknown }).blocks,
+  );
+  assert.equal(plain.differenceCents, '24000');
+});
+
+test('B13: the enrollment minimum is discounted at the first window rate, then x quantity (E4)', () => {
+  // Minimum seven days at 30, three days active: floor 210.00, 10% off 189.00.
+  const floor = timePlan(
+    {
+      minimumDuration: { period: 'day', count: 7 },
+      discount: off,
+      timing: arrearsTiming,
+    },
+    { day: 'd' },
+  );
+  const floorPlan = { ...floor, slots: slotList(['d'], ['off']) };
+  const [line] = quoteLines(floorPlan, 3, { d: '30', off: '10' });
+  assert.equal(line!.differenceCents, '18900');
+  assert.equal(line!.discount?.grossCents, '21000');
+  // E4: ladder at 20 a day or 100 a week, ten days (160), quantity 2, 15% off.
+  const ladder = timePlan({
+    combination: { rule: 'ladder', capAtNextTier: false },
+    discount: off,
+    timing: arrearsTiming,
+  });
+  const ladderPlan = { ...ladder, slots: slotList(['d', 'w'], ['off']) };
+  const quote = quoteBillingService(
+    ladderPlan,
+    evidence(ladderPlan, 10, { d: '20', w: '100', off: '15' }, '2'),
+  );
+  assert.equal(quote.lines[0]!.differenceCents, '27200');
+  assert.equal(quote.lines[0]!.discount?.discountCents, '4800');
+});
+
+test('B13: a fixed fee is discounted per occurrence, with its rate and version', () => {
+  const planInput = advancePlan({
+    slots: ['rent'],
+    components: [{ ...feeComponent('rent', 'rent', advance), discount: off }],
+  }) as { slots: unknown[] };
+  planInput.slots = slotList(['rent'], ['off']);
+  const lines = reviewArrearsCharges(
+    compileRatePlan(planInput).plan,
+    e1Evidence(planInput, july, null, { rent: '300', off: '10' }),
+  );
+  assert.ok(lines.status === 'due');
+  assert.deepEqual(
+    lines.quote.lines.map((l) => [
+      l.differenceCents,
+      l.discount?.discountCents,
+      l.discount?.rate,
+    ]),
+    [
+      ['18900', '2100', '10'],
+      ['27000', '3000', '10'],
+    ],
+  );
+});
+
+test('B13: a percentage above 100 refuses in every table, overrides included', () => {
+  const planInput = e3Plan();
+  assert.throws(
+    () => quoteLines(planInput, 7, { ...e3Values, off: '100.01' }),
+    /percentage above 100/,
+  );
+  const ev = evidence(planInput, 7, e3Values);
+  ev.tables.push({
+    ...ev.tables[0]!,
+    version: 'override',
+    selector: { kind: 'customer', customerId: 'c1' },
+    values: { ...e3Values, off: '150' },
+  });
+  assert.throws(
+    () => quoteBillingService(planInput, ev),
+    /percentage above 100/,
+  );
+  // 100 is a whole discount: a 0.00 line that keeps its evidence.
+  const [free] = quoteLines(planInput, 7, { ...e3Values, off: '100' });
+  assert.equal(free!.differenceCents, '0');
+  assert.equal(free!.discount?.discountCents, '10000');
+});
+
+// E5: a 12% damage waiver on E3's time line.
+function waiver(stage: 'gross' | 'net') {
+  return {
+    kind: 'percentage',
+    id: 'waiver',
+    taxClassification: 'untaxed',
+    stage: 'afterCapBeforeTax',
+    rate: 'waiver',
+    base: { componentId: 'time', stage },
+  };
+}
+test('B13: a percentage component rates its base at the named stage (E5)', () => {
+  const values = { ...e3Values, waiver: '12' };
+  const at = (stage: 'gross' | 'net', days: number) =>
+    quoteLines(e3Plan([waiver(stage)], ['off', 'waiver']), days, values).map(
+      (l) => [l.componentId, l.occurrence, l.differenceCents],
+    );
+  const pct = JSON.stringify(['pct', JSON.stringify(['time', 'band'])]);
+  assert.deepEqual(at('net', 20), [
+    ['time', JSON.stringify(['time', 'band']), '21600'],
+    ['waiver', pct, '2592'],
+  ]);
+  assert.deepEqual(at('gross', 20)[1], ['waiver', pct, '2880']);
+  // Split as E3: 10.80 after day 7, then 15.12.
+  assert.deepEqual(at('net', 7)[1], ['waiver', pct, '1080']);
+});
+
+test('B13: a percentage component mirrors each fee occurrence and its timing', () => {
+  const planInput = advancePlan({
+    components: [
+      feeComponent('rent', 'rent', advance),
+      { ...waiver('gross'), base: { componentId: 'rent', stage: 'gross' } },
+    ],
+  }) as { slots: unknown[] };
+  planInput.slots = slotList(['rent'], ['waiver']);
+  const review = (asOf: string) =>
+    reviewLines(
+      reviewArrearsCharges(
+        compileRatePlan(planInput).plan,
+        e1Evidence(planInput, asOf, null, { rent: '300', waiver: '12' }),
+      ),
+    );
+  // Billed in advance with its base, before any cycle closes.
+  assert.deepEqual(review(e1Start), [
+    ['rent', e1Start, '21000'],
+    ['waiver', e1Start, '2520'],
+  ]);
+  assert.deepEqual(review(july).slice(2), [
+    ['waiver', e1Start, '2520'],
+    ['waiver', july, '3600'],
+  ]);
+});
+
+test('B13: discount and percentage refusals, and the pricing reader', () => {
+  const refused = (planInput: unknown, message: RegExp, reason: string) => {
+    const parsed = BillingPlanSchema.safeParse(planInput);
+    assert.equal(parsed.success, false, reason);
+    assert.match(JSON.stringify(parsed.error?.issues), message, reason);
+  };
+  refused(
+    { ...e3Plan(), slots: slotList(['d', 'w', 'cap', 'off'], []) },
+    /Incompatible billing slot off/,
+    'a discount rate on a money slot',
+  );
+  refused(
+    {
+      ...e3Plan([waiver('net')], ['off']),
+      slots: slotList(['d', 'w', 'cap', 'waiver'], ['off']),
+    },
+    /Incompatible billing slot waiver/,
+    'a percentage rate on a money slot',
+  );
+  for (const [componentId, reason] of [
+    ['missing', 'an unknown base'],
+    ['waiver', 'itself as its base'],
+  ])
+    refused(
+      e3Plan(
+        [{ ...waiver('net'), base: { componentId, stage: 'net' } }],
+        ['off', 'waiver'],
+      ),
+      /one non-percentage component as its base/,
+      reason,
+    );
+  refused(
+    e3Plan(
+      [
+        waiver('net'),
+        {
+          ...waiver('net'),
+          id: 'second',
+          base: { componentId: 'waiver', stage: 'net' },
+        },
+      ],
+      ['off', 'waiver'],
+    ),
+    /one non-percentage component as its base/,
+    'another percentage as its base',
+  );
+  for (const [key, value] of [
+    ['discount', off],
+    ['timing', arrearsTiming],
+    ['base', [{ componentId: 'time', stage: 'net' }]],
+  ] as const)
+    assert.equal(
+      BillingPlanSchema.safeParse(
+        e3Plan([{ ...waiver('net'), [key]: value }], ['off', 'waiver']),
+      ).success,
+      false,
+      'a percentage component with ' + key,
+    );
+  // A discount is a v5 key: it requires stated timing.
+  const untimed = e3Plan() as { components: Authored[] };
+  untimed.components = [{ ...untimed.components[0], timing: undefined }];
+  refused(
+    untimed,
+    /states it on every component/,
+    'a discount with no stated timing',
+  );
+  assert.equal(hasBillingPricing(e3Plan()), true);
+  assert.deepEqual(
+    billingReleaseTerms([e3Plan()]).floor,
+    BILLING_PRICING_READER,
+  );
+  // Plans without a discount keep the key absent (digest stability).
+  assert.equal(
+    'discount' in compileRatePlan(advancePlan()).plan.components[0]!,
+    false,
+  );
+});

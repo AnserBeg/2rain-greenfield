@@ -18,6 +18,8 @@ export function normalizeBillingPlan(plan: AuthoredBillingPlan) {
             allowanceProration:
               component.allowanceProration ?? ('activeCoverage' as const),
           };
+        case 'percentage':
+          return component;
         case 'fixed': {
           const fee = component.occurrence;
           return {

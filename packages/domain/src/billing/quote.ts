@@ -120,6 +120,18 @@ export interface BillingQuoteLine {
   reservedCents: string;
   differenceCents: string;
   derivation: readonly unknown[];
+  /** B13 (calculation v5): present only on a discounted line. The line's
+   * entitlement is the net; gross = net + discount exactly in cents. */
+  discount?: {
+    kind: 'percent';
+    reason: string;
+    rate?: string;
+    rateVersion?: string;
+    grossExact: string;
+    discountExact: string;
+    grossCents: string;
+    discountCents: string;
+  };
 }
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
 type Component = BillingPlan['components'][number];
@@ -379,20 +391,57 @@ function calculate(
   if (allocations.size !== e.allocations.length)
     throw new Error('Duplicate prior allocation');
   const lines: BillingQuoteLine[] = [];
+  // Each rated line's exact gross and net, for percentage components, which
+  // are rated after their base although components sort by id.
+  const rated: {
+    componentId: string;
+    occurrence: string;
+    start: number;
+    end: number;
+    opening: number;
+    gross: Fraction;
+    net: Fraction;
+  }[] = [];
+  const hundred = integer(100);
+  /** The share a percent discount keeps, under one table's values. */
+  const kept = (c: Component, values: Readonly<Record<string, string>>) =>
+    'discount' in c && c.discount
+      ? one.minus(decimal(values[c.discount.rate]!).over(hundred))
+      : one;
   function line(
     c: BillingPlan['components'][number],
     occurrence: string,
     start: number,
     end: number,
-    earned: Fraction,
+    gross: Fraction,
     derivation: readonly unknown[],
+    // The opening whose terms rated the line, and the net when the caller
+    // discounted it window by window (time); otherwise the table discounts.
+    priced: {
+      opening: number;
+      table?: { version: string; values: Readonly<Record<string, string>> };
+      net?: Fraction;
+    },
   ) {
     const key = occurrenceId(c.id, occurrence),
       prior = allocations.get(key);
     allocations.delete(key);
+    const off = 'discount' in c ? c.discount : undefined;
+    const earned =
+      priced.net ?? (off ? gross.times(kept(c, priced.table!.values)) : gross);
+    rated.push({
+      componentId: c.id,
+      occurrence,
+      start,
+      end,
+      opening: priced.opening,
+      gross,
+      net: earned,
+    });
     const cents = earned.cents(),
       allocated = prior?.allocatedCents ?? '0',
       reserved = prior?.reservedCents ?? '0';
+    const grossCents = gross.cents();
     lines.push({
       componentId: c.id,
       occurrence,
@@ -407,6 +456,21 @@ function calculate(
       reservedCents: reserved,
       differenceCents: String(cents - BigInt(allocated) - BigInt(reserved)),
       derivation,
+      ...(off && {
+        discount: {
+          kind: off.kind,
+          reason: off.reason,
+          ...(priced.table &&
+            priced.net === undefined && {
+              rate: priced.table.values[off.rate]!,
+              rateVersion: priced.table.version,
+            }),
+          grossExact: gross.toString(),
+          discountExact: gross.minus(earned).toString(),
+          grossCents: String(grossCents),
+          discountCents: String(grossCents - cents),
+        },
+      }),
     });
   }
   const budget = { remaining: 100000 };
@@ -420,8 +484,14 @@ function calculate(
     if (e.basis === 'usageOnly')
       throw new Error('Time component requires service intervals');
     for (const band of coverage.bands) {
+      // Gross and net run side by side: the net discounts each window's
+      // capped amount at that window's rate, and the enrollment floor at the
+      // first positive window's rate (B13: after the minimum and the cap).
       let total = zero,
-        enrollmentFloor: Fraction | null = null;
+        totalNet = zero,
+        enrollmentFloor: Fraction | null = null,
+        floorKept = one,
+        opening: number | null = null;
       const trace = [];
       for (const w of windows) {
         const segments = timeline(calendar, w.day, w.next, band.active);
@@ -442,14 +512,19 @@ function calculate(
                 values,
                 budget,
               );
-        if (enrollmentFloor === null)
+        const keep = kept(c, values);
+        if (enrollmentFloor === null) {
           enrollmentFloor = cap ? floor.min(cap) : floor;
+          floorKept = keep;
+          opening = w.start;
+        }
         const gross =
           c.minimumScope === 'perPricingWindow'
             ? cover.price.max(floor)
             : cover.price;
         const net = cap ? gross.min(cap) : gross;
         total = total.plus(net);
+        totalNet = totalNet.plus(net.times(keep));
         const blockKey = occurrenceId(c.id, iso(w.start));
         const grants = winning.get(blockKey) ?? [];
         grants.push({ quantity: band.quantity, blocks: cover.blocks });
@@ -463,6 +538,7 @@ function calculate(
           floor: floor.toString(),
           cap: cap?.toString() ?? null,
           capped: net.toString(),
+          ...(c.discount && { discountRate: values[c.discount.rate] }),
           quantity: band.quantity.toString(),
           blocks: cover.blocks.map((b) => ({
             period: b.period,
@@ -471,8 +547,10 @@ function calculate(
           })),
         });
       }
-      if (c.minimumScope === 'perEnrollment' && enrollmentFloor)
+      if (c.minimumScope === 'perEnrollment' && enrollmentFloor) {
         total = total.max(enrollmentFloor);
+        totalNet = totalNet.max(enrollmentFloor.times(floorKept));
+      }
       line(
         c,
         occurrenceId('time', band.id),
@@ -480,6 +558,10 @@ function calculate(
         through,
         total.times(band.quantity),
         trace,
+        {
+          opening: opening ?? anchor,
+          ...(c.discount && { net: totalNet.times(band.quantity) }),
+        },
       );
     }
   }
@@ -531,7 +613,8 @@ function calculate(
         const period = fee.at === 'serviceStart' ? cycles[0] : cycles.at(-1);
         if (!period || (fee.at === 'serviceEnd' && through !== serviceEnd))
           continue;
-        const t = terms(fee.at === 'serviceEnd' ? through : anchor).table;
+        const at = fee.at === 'serviceEnd' ? through : anchor;
+        const t = terms(at).table;
         line(
           c,
           occurrenceId(fee.at),
@@ -546,6 +629,7 @@ function calculate(
               ...perQuantity,
             },
           ],
+          { opening: at, table: t },
         );
         continue;
       }
@@ -590,6 +674,7 @@ function calculate(
                 ...(binding && { minimumTermEnd: iso(binding.end) }),
               },
             ],
+            { opening: o.start, table: t },
           );
         }
         continue;
@@ -634,6 +719,7 @@ function calculate(
               ...(binding && { minimumTermEnd: iso(binding.end) }),
             },
           ],
+          { opening: o.start, table: t },
         );
       }
     } else if (c.kind === 'meter') {
@@ -720,8 +806,39 @@ function calculate(
               rate: rate.toString(),
             },
           ],
+          { opening: o.start, table: t },
         );
       }
+    }
+  }
+  // Percentage components (the reserved row): each mirrors its base's lines,
+  // rated after them on the base's exact gross or net, rounded once. Its
+  // rate is read at the base line's opening (for time, the first positive
+  // pricing window, as for the enrollment minimum).
+  for (const c of plan.components) {
+    if (c.kind !== 'percentage') continue;
+    for (const base of rated.filter(
+      (r) => r.componentId === c.base.componentId,
+    )) {
+      const t = terms(base.opening).table;
+      const on = c.base.stage === 'gross' ? base.gross : base.net;
+      line(
+        c,
+        occurrenceId('pct', base.occurrence),
+        base.start,
+        base.end,
+        on.times(decimal(t.values[c.rate]!).over(hundred)),
+        [
+          {
+            rateVersion: t.version,
+            rate: t.values[c.rate],
+            base: c.base.componentId,
+            stage: c.base.stage,
+            baseExact: on.toString(),
+          },
+        ],
+        { opening: base.opening, table: t },
+      );
     }
   }
   if (allocations.size)
