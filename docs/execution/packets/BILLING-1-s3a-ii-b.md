@@ -12,6 +12,7 @@ CI tier: pending full
    - E1m: Jun 210 + Jul 300 + Aug 300 + Sep 1-10 90 = 900.00.
    - Held cycles are rated on [service end, term end) only, never on an open-ended agreed interval.
    - In arrears, the review that reaches the service end rates every cycle up to the term end.
+   - `feeProration: none` refuses beside either term form on a fee, because it would bill a partly held cycle whole (advisor check against the ruling).
    - A one-off fee cannot declare a term. Declaring the fee term together with `earlyReturn.minimumTerm` is refused. The early-return form alone stays admitted (amendment 6).
 3. **Slice-a correction** (orchestrator ruling, 2026-11-28: a minimum term charges exactly the term, prorated, never more).
    - The flaw: an advance fee whose service end is held past the last return by `earlyReturn` billed each held cycle whole on the open-ended agreed interval. On the same facts, the early-return term form gave 1110.00.
@@ -40,6 +41,10 @@ CI tier: pending full
 - Recorded in ADR-0083 as unruled choices: the discount applies after the minimum, so a discounted line can fall below the stated minimum (amendment 10(a)). A percentage on the cumulative time line uses the first window's rate (narrower on purpose).
 - The early-return term form keeps its timing: held cycles fall due as they open. Only the amount is clipped.
 - The served path still reviews only the first arrears cycle until s3b stores checkpoints, so an arrears fee term is reached only in a review whose period start is the final cycle (amendment 3 note).
+
+## Owed
+- A fee `minimumTerm` longer than the 3,660-day calendar horizon (for example `{month, 744}`) throws on every early-ended review. It fails closed; a parse refusal is owed (the amendment-6 class).
+- Under `earlyReturn.bill: agreedEnd` the committed interval clip also applies to cycles opening after the return. It rates the same committed time the arrears side bills; the review should confirm it.
 
 ## Rules 16, 17
 (a) Minimum terms suit rentals, leases, subscriptions, coworking and service contracts. Discounts suit any priced line, with per-customer and price-list discounts through overrides. Percentage components cover damage waivers, service charges, environmental fees and insurance. (b) Any recurring fee, time line or meter can use them unchanged. (c) Narrower: percent discounts only (amount discounts are slice f), one base per percentage component, and time in advance is slice e.
